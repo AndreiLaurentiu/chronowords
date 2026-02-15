@@ -1,0 +1,285 @@
+import os
+import shutil
+
+dir_to_delete = "/kaggle/working/clustering_comparison_results"
+
+if os.path.exists(dir_to_delete):
+    if os.path.isdir(dir_to_delete):
+        shutil.rmtree(dir_to_delete)
+        print(f"Deleted directory: {dir_to_delete}")
+    else:
+        print(f"Path exists but is not a directory: {dir_to_delete}")
+else:
+    print(f"Directory not found: {dir_to_delete}")
+
+###########################################################################
+
+import os
+import torch
+from datasets import load_dataset
+from transformers import (
+    AutoTokenizer,
+    AutoModelForMaskedLM,
+    DataCollatorForLanguageModeling,
+    Trainer,
+    TrainingArguments,
+    set_seed
+)
+
+# Configuration to match Discovery Team's setup
+MODEL_NAME_OR_PATH = "/kaggle/input/bert-for-kaggle/bert_for_kaggle"
+CORPUS1 = "/kaggle/input/semeval-datasets/c1.txt"
+CORPUS2 = "/kaggle/input/semeval-datasets/c2.txt"
+TARGETS_PATH = "/kaggle/input/targets/targets.tsv"
+OUTPUT_DIR_1 = "/kaggle/working/model_output_1"
+OUTPUT_DIR_2 = "/kaggle/working/model_output_2"
+BLOCK_SIZE = 512
+MLM_PROB = 0.15
+EPOCHS = 5
+BATCH_SIZE = 16
+SAVE_STEPS = 10000
+LOGGING_STEPS = 100
+SEED = 42
+
+# Set seed
+set_seed(SEED)
+
+# === Preprocessing ===
+def filter_line(line, targets):
+    wrong_pos = False
+    correct_pos = False
+    for target in targets:
+        tokens = line.split()
+        if target in line:
+            line = line.replace(target, target[:-3])
+            correct_pos = True
+        if target[:-3] in tokens:
+            wrong_pos = True
+    if correct_pos:
+        return line
+    elif wrong_pos:
+        return None
+    return line
+
+def preprocess(corpus_paths, target_path, output_folder):
+    with open(target_path, "r", encoding="utf8") as f:
+        targets = [line.strip() for line in f if line.strip()]
+
+    for i, corpus in enumerate(corpus_paths):
+        output_path = os.path.join(output_folder, f"english_preprocessed_{i+1}.txt")
+        with open(corpus, "r", encoding="utf8") as fin, open(output_path, "w", encoding="utf8") as fout:
+            for line in fin:
+                filtered = filter_line(line, targets)
+                if filtered is not None:
+                    fout.write(filtered.strip() + "\n")
+        print(f"Preprocessed: {output_path}")
+
+# === Fine-tuning ===
+def load_dataset_line_by_line(file_path, tokenizer):
+    dataset = load_dataset("text", data_files={"train": file_path})
+
+    def tokenize_line_by_line(example):
+        return tokenizer(
+            example["text"],
+            truncation=True,
+            max_length=BLOCK_SIZE,
+            add_special_tokens=True
+        )
+
+    tokenized_dataset = dataset["train"].map(
+        tokenize_line_by_line,
+        batched=False,
+        remove_columns=["text"]
+    )
+    return tokenized_dataset
+
+def get_latest_checkpoint(output_dir):
+    if not os.path.exists(output_dir):
+        return None
+    checkpoints = [
+        d for d in os.listdir(output_dir)
+        if os.path.isdir(os.path.join(output_dir, d)) and d.startswith("checkpoint-")
+    ]
+    if not checkpoints:
+        return None
+    checkpoints.sort(key=lambda x: int(x.split("-")[-1]))
+    return os.path.join(output_dir, checkpoints[-1])
+
+def train_model(corpus_file, output_dir):
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME_OR_PATH, local_files_only=True)
+
+    latest_checkpoint = get_latest_checkpoint(output_dir)
+    if latest_checkpoint:
+        print(f"Resuming from checkpoint: {latest_checkpoint}")
+        model = AutoModelForMaskedLM.from_pretrained(latest_checkpoint)
+    else:
+        print("Starting from base model")
+        model = AutoModelForMaskedLM.from_pretrained(MODEL_NAME_OR_PATH, local_files_only=True)
+
+    dataset = load_dataset_line_by_line(corpus_file, tokenizer)
+
+    data_collator = DataCollatorForLanguageModeling(
+        tokenizer=tokenizer,
+        mlm=True,
+        mlm_probability=MLM_PROB
+    )
+
+    training_args = TrainingArguments(
+        output_dir=output_dir,
+        overwrite_output_dir=True,
+        num_train_epochs=EPOCHS,
+        per_device_train_batch_size=BATCH_SIZE,
+        save_steps=SAVE_STEPS,
+        save_total_limit=2,
+        seed=SEED,
+        prediction_loss_only=True,
+        logging_steps=LOGGING_STEPS,
+        report_to="none"
+    )
+
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=dataset,
+        data_collator=data_collator,
+    )
+
+    print(f"\nStarting fine-tuning on {corpus_file}...")
+    trainer.train(resume_from_checkpoint=latest_checkpoint if latest_checkpoint else None)
+    model.save_pretrained(output_dir)
+    tokenizer.save_pretrained(output_dir)
+    print(f"\nModel saved to {output_dir}")
+
+# === Main ===
+if __name__ == "__main__":
+    # Step 1: Preprocess corpus
+    #preprocess([CORPUS1, CORPUS2], TARGETS_PATH, "/kaggle/working")
+
+    # Step 2: Train models
+    #train_model("/kaggle/working/english_preprocessed_1.txt", OUTPUT_DIR_1)
+    train_model("/kaggle/working/english_preprocessed_2.txt", OUTPUT_DIR_2)
+
+    print("\nFine-tuning complete")
+
+####################################################################################
+
+from transformers import BertTokenizer, BertModel
+import torch
+import numpy as np
+import pickle
+import gc
+from collections import defaultdict
+
+# === CONFIGURATION ===
+CORPUS_PATHS = [
+    "/kaggle/working/english_preprocessed_1.txt",
+    "/kaggle/working/english_preprocessed_2.txt"
+]
+TARGET_PATH = "/kaggle/input/targets/targets.tsv"
+FINE_TUNED_MODEL_1 = "/kaggle/working/model_output_1"
+FINE_TUNED_MODEL_2 = "/kaggle/working/model_output_2"
+EMBEDDINGS_PATH_1 = "/kaggle/working/embeddings_english_1.pickle"
+EMBEDDINGS_PATH_2 = "/kaggle/working/embeddings_english_2.pickle"
+LANG = "english"
+BATCH_SIZE = 8
+MAX_LENGTH = 256
+USE_GPU = torch.cuda.is_available()
+
+# === UTILS ===
+def chunks(lst, n):
+    for i in range(0, len(lst), n):
+        yield lst[i:i + n]
+
+def get_targets(input_path, lang):
+    targets_dict = {}
+    with open(input_path, 'r', encoding='utf8') as f:
+        for line in f:
+            target = line.strip()
+            if lang == "english":
+                target_no_pos = target[:-3]  # e.g., 'bank__nn' -> 'bank'
+                targets_dict[target_no_pos] = target
+            else:
+                targets_dict[target] = target
+    return targets_dict
+
+def tokens_to_batches(ds, tokenizer, batch_size, max_length, target_words):
+    batches, batch = [], []
+    with open(ds, 'r', encoding='utf8') as f:
+        for line in f:
+            text = line.strip()
+            if any(w in set(text.split()) for w in target_words):
+                marked_text = "[CLS] " + text + " [SEP]"
+                tokenized_text = tokenizer.tokenize(marked_text) # ex ["cat", "test"]
+                for i in range(0, len(tokenized_text), max_length): # max de cuv max_length
+                    input_sequence = tokenized_text[i:i + max_length]
+                    indexed_tokens = tokenizer.convert_tokens_to_ids(input_sequence) #  ["123","968"]
+                    batch.append((indexed_tokens, input_sequence))
+                    if len(batch) == batch_size:
+                        batches.append(batch)
+                        batch = []
+    return batches
+
+def get_token_embeddings(batches, model, batch_size, gpu):
+    all_embeddings, all_tokens = [], []
+    for batch in batches:
+        lens = [len(x[0]) for x in batch]
+        max_len = max(lens)
+        tokens_tensor = torch.zeros(batch_size, max_len, dtype=torch.long)
+        segments_tensor = torch.zeros(batch_size, max_len, dtype=torch.long)
+        for i, (ids, _) in enumerate(batch):
+            tokens_tensor[i, :len(ids)] = torch.tensor(ids)
+        if gpu:
+            tokens_tensor = tokens_tensor.cuda()
+            segments_tensor = segments_tensor.cuda()
+        with torch.no_grad():
+            outputs = model(tokens_tensor, segments_tensor)
+            hidden_states = outputs.hidden_states[-4:]
+            layer_stack = torch.stack(hidden_states)
+            sum_last_4 = torch.sum(layer_stack, dim=0)
+        for i, (_, tokens) in enumerate(batch):
+            all_embeddings.append([sum_last_4[i, j].cpu().numpy() for j in range(len(tokens))])
+            all_tokens.append(tokens)
+    return all_embeddings, all_tokens
+
+def get_time_embeddings(embeddings_path, datasets, tokenizer, model, batch_size, max_length, target_dict, gpu=True):
+    targets = list(target_dict.keys()) # ex word_nn
+    vectors = {}
+    for ds in datasets:
+        period = ds[-5:-4] # 1 sau 2
+        batches = tokens_to_batches(ds, tokenizer, batch_size, max_length, targets)
+        for chunk in chunks(batches, 1000):
+            embeddings, tokens = get_token_embeddings(chunk, model, batch_size, gpu)
+            for e_idx, token_list in enumerate(tokens):
+                context = tokenizer.convert_tokens_to_string(token_list)
+                for i, token in enumerate(token_list):
+                    word = token.replace('##', '').lower()
+                    match = target_dict.get(word)
+                    if match:
+                        vec = embeddings[e_idx][i]
+                        if match not in vectors:
+                            vectors[match] = {}
+                        if f"t{period}" not in vectors[match]:
+                            vectors[match][f"t{period}"] = []
+                            vectors[match][f"t{period}_text"] = []
+                        vectors[match][f"t{period}"].append(vec)
+                        vectors[match][f"t{period}_text"].append(context)
+        gc.collect()
+    with open(embeddings_path, 'wb') as f:
+        pickle.dump(vectors, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+# === MAIN ===
+tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+model1 = BertModel.from_pretrained(FINE_TUNED_MODEL_1, output_hidden_states=True)
+model2 = BertModel.from_pretrained(FINE_TUNED_MODEL_2, output_hidden_states=True)
+if USE_GPU:
+    model1 = model1.cuda()
+    model2 = model2.cuda()
+model1.eval()
+model2.eval()
+
+targets = get_targets(TARGET_PATH, LANG)
+get_time_embeddings(EMBEDDINGS_PATH_1, [CORPUS_PATHS[0]], tokenizer, model1, BATCH_SIZE, MAX_LENGTH, targets, USE_GPU)
+get_time_embeddings(EMBEDDINGS_PATH_2, [CORPUS_PATHS[1]], tokenizer, model2, BATCH_SIZE, MAX_LENGTH, targets, USE_GPU)
+print("Embedding extraction complete.")
+
+#########################################################################################

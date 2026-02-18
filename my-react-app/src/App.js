@@ -35,7 +35,12 @@ const SemanticChangeApp = () => {
     if (!query) return;
 
     try {
-      const res = await fetch(`http://localhost:5000/api/words/${encodeURIComponent(query)}`);
+          const API_BASE =
+      import.meta?.env?.VITE_API_URL ||
+      process.env.REACT_APP_API_URL ||
+      "http://localhost:5000";
+
+    const res = await fetch(`${API_BASE}/api/words/${encodeURIComponent(query)}`);
       if (!res.ok) throw new Error("Word not found");
 
       const raw = await res.json();

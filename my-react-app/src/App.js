@@ -19,31 +19,81 @@ import {
   faHouse,
 } from "@fortawesome/free-solid-svg-icons";
 
+const getApiBase = () =>
+  import.meta.env?.VITE_API_URL ||
+  (typeof process !== "undefined" ? process.env.REACT_APP_API_URL : undefined) ||
+  "http://localhost:5000";
+
+function useDebouncedValue(value, delayMs) {
+  const [debounced, setDebounced] = React.useState(value);
+
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(t);
+  }, [value, delayMs]);
+
+  return debounced;
+}
+
+const stripPosSuffix = (rawWord, pos) => {
+  if (!rawWord) return "";
+
+  const sepMatch = rawWord.match(/^(.*?)(__|_|-)([a-z]{1,4})$/i);
+  if (sepMatch) return sepMatch[1];
+
+  if (pos) {
+    const lower = rawWord.toLowerCase();
+    const posLower = String(pos).toLowerCase();
+
+    if (lower.endsWith(posLower) && rawWord.length > posLower.length + 1) {
+      return rawWord.slice(0, rawWord.length - posLower.length);
+    }
+  }
+
+  return rawWord;
+};
+
 const SemanticChangeApp = () => {
-  const [activePage, setActivePage] = useState("home"); // ✅ NEW (home | about)
+  const [activePage, setActivePage] = useState("home");
 
   const [word, setWord] = useState("");
+  const [searchWordForCurrentInput, setSearchWordForCurrentInput] = useState(null);
+
   const [wordForms, setWordForms] = useState([]);
   const [selectedForm, setSelectedForm] = useState(null);
 
-  // Axes UI state
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [activeSuggestionIdx, setActiveSuggestionIdx] = useState(-1);
+
+  const inputWrapRef = React.useRef(null);
+  const [dropdownStyle, setDropdownStyle] = useState(null);
+  const suppressSuggestRef = React.useRef(false);
+
   const [showAllAxes, setShowAllAxes] = useState(false);
   const [expandedAxisIds, setExpandedAxisIds] = useState(new Set());
 
-  const fetchSemanticChange = async (overrideWord) => {
-    const query = (overrideWord ?? word)?.trim();
+  const debouncedWord = useDebouncedValue(word, 200);
+
+  const resetSuggestions = () => {
+    setSuggestions([]);
+    setShowSuggestions(false);
+    setActiveSuggestionIdx(-1);
+  };
+
+  const fetchSemanticChange = async (overrideWord, displayWord) => {
+    const query = (overrideWord ?? searchWordForCurrentInput ?? word)?.trim();
     if (!query) return;
 
     try {
-          const API_BASE =
-      import.meta?.env?.VITE_API_URL ||
-      process.env.REACT_APP_API_URL ||
-      "http://localhost:5000";
+      const API_BASE = getApiBase();
 
-    const res = await fetch(`${API_BASE}/api/words/${encodeURIComponent(query)}`);
+      const res = await fetch(`${API_BASE}/api/words/${encodeURIComponent(query)}`);
       if (!res.ok) throw new Error("Word not found");
 
       const raw = await res.json();
+      console.log("Fetched word:", query);
+      console.log("Raw backend response:", raw);
       const data = Array.isArray(raw) ? raw : [raw];
 
       const forms = data.map((entry) => {
@@ -61,30 +111,165 @@ const SemanticChangeApp = () => {
           clusters: entry.clusters,
           total_examples: entry.total_examples,
           history,
-
           axes_explanation: entry.axes_explanation || [],
           axis_examples: entry.axis_examples || {},
           similar_drift_words: entry.similar_drift_words || [],
         };
       });
 
-      setWord(query);
+      setSearchWordForCurrentInput(query);
+      setWord(displayWord ?? stripPosSuffix(query));
       setWordForms(forms);
       setSelectedForm(forms[0] || null);
 
-      // Reset axes UI
+      resetSuggestions();
+
       setShowAllAxes(false);
       setExpandedAxisIds(new Set());
     } catch (error) {
       console.error("Error fetching data:", error);
+
       setWordForms([]);
       setSelectedForm(null);
+      resetSuggestions();
     }
   };
 
+  React.useEffect(() => {
+    if (suppressSuggestRef.current) {
+      suppressSuggestRef.current = false;
+      return;
+    }
+
+    const q = debouncedWord.trim();
+
+    if (!q) {
+      resetSuggestions();
+      return;
+    }
+
+    const API_BASE = getApiBase();
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/words/suggest?q=${encodeURIComponent(q)}&limit=10`
+        );
+
+        if (!res.ok) throw new Error("suggest failed");
+
+        const data = await res.json();
+        if (cancelled) return;
+
+        setSuggestions(Array.isArray(data) ? data : []);
+        setShowSuggestions(Array.isArray(data) && data.length > 0);
+        setActiveSuggestionIdx(-1);
+      } catch (e) {
+        if (cancelled) return;
+        resetSuggestions();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedWord]);
+
+  React.useEffect(() => {
+    if (!showSuggestions) return;
+
+    const updatePos = () => {
+      const wrap = inputWrapRef.current;
+      if (!wrap) return;
+
+      const el = wrap.querySelector("input") || wrap;
+      const r = el.getBoundingClientRect();
+
+      setDropdownStyle({
+        position: "fixed",
+        left: r.left,
+        top: r.bottom + 6,
+        width: r.width,
+        zIndex: 9999,
+        background: "white",
+        border: "1px solid #e5e7eb",
+        borderRadius: 10,
+        boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
+        overflow: "hidden",
+        maxHeight: 240,
+        overflowY: "auto",
+      });
+    };
+
+    updatePos();
+    window.addEventListener("resize", updatePos);
+    window.addEventListener("scroll", updatePos, true);
+
+    return () => {
+      window.removeEventListener("resize", updatePos);
+      window.removeEventListener("scroll", updatePos, true);
+    };
+  }, [showSuggestions, suggestions.length]);
+
   const handleSimilarWordClick = (w) => {
     if (!w) return;
-    fetchSemanticChange(w);
+
+    const displayValue = stripPosSuffix(w.word ?? w, w.pos).trim();
+    const searchValue = (w.word ?? w).trim();
+
+    if (!searchValue) return;
+
+    suppressSuggestRef.current = true;
+
+    resetSuggestions();
+
+    setSearchWordForCurrentInput(searchValue);
+    setWord(displayValue);
+
+    fetchSemanticChange(searchValue, displayValue);
+  };
+
+  const handlePickSuggestion = (sug) => {
+    const searchValue = sug?.word?.trim();
+    const displayValue = stripPosSuffix(sug?.word, sug?.pos).trim();
+
+    if (!searchValue) return;
+
+    suppressSuggestRef.current = true;
+
+    resetSuggestions();
+
+    setSearchWordForCurrentInput(searchValue);
+    setWord(displayValue);
+
+    fetchSemanticChange(searchValue, displayValue);
+  };
+
+  const handleInputKeyDown = (e) => {
+    if (!showSuggestions || suggestions.length === 0) {
+      if (e.key === "Enter") {
+        fetchSemanticChange(searchWordForCurrentInput ?? word, word);
+      }
+      return;
+    }
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveSuggestionIdx((i) => Math.min(i + 1, suggestions.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveSuggestionIdx((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+
+      const picked = suggestions[Math.max(activeSuggestionIdx, 0)];
+
+      if (picked) handlePickSuggestion(picked);
+      else fetchSemanticChange(searchWordForCurrentInput ?? word, word);
+    } else if (e.key === "Escape") {
+      resetSuggestions();
+    }
   };
 
   const toggleAxisExpanded = (axisId) => {
@@ -106,10 +291,13 @@ const SemanticChangeApp = () => {
 
   const axisShortLabel = (ax) => {
     const name = ax.axis_name?.trim();
+
     if (name && name.length <= 72) return name;
     if (name && name.length > 72) return `${name.slice(0, 72)}…`;
+
     const left = (ax.top_pos_words || []).slice(0, 3).join("/");
     const right = (ax.top_neg_words || []).slice(0, 3).join("/");
+
     return `${left || "—"} ↔ ${right || "—"}`;
   };
 
@@ -146,21 +334,28 @@ const SemanticChangeApp = () => {
     );
   };
 
-  const PillList = ({ title, items }) => (
+const PillList = ({ title, items }) => {
+  const safeItems = Array.isArray(items) ? items : [];
+
+  return (
     <div className="bg-white border border-gray-200 rounded-xl p-4">
       <p className="text-sm font-semibold text-gray-700 mb-3">{title}</p>
 
-      {items?.length ? (
-        <p className="text-sm text-gray-800 break-words">{items.slice(0, 12).join(" - ")}</p>
+      {safeItems.length ? (
+        <p className="text-sm text-gray-800 break-words">
+          {safeItems.slice(0, 12).join(" - ")}
+        </p>
       ) : (
         <p className="text-sm text-gray-500 italic">—</p>
       )}
     </div>
   );
+};
 
   const ExampleList = ({ label, examples }) => (
     <div className="bg-white border border-gray-200 rounded-xl p-4">
       <h5 className="text-md font-bold text-indigo-700 mb-3">{label}</h5>
+
       {examples?.length ? (
         <div className="space-y-3">
           {examples.slice(0, 6).map((ex, i) => (
@@ -184,13 +379,11 @@ const SemanticChangeApp = () => {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-r from-blue-400 to-indigo-500 p-8">
       <div className="w-full max-w-3xl bg-white p-10 rounded-3xl shadow-2xl flex flex-col items-center justify-center text-center space-y-6 mx-auto">
-        {/* Header */}
         <h1 className="text-5xl font-extrabold text-indigo-700 shadow-lg tracking-wide flex items-center">
           <FontAwesomeIcon icon={faClock} className="mr-4 text-indigo-600" />
           ChronoWords
         </h1>
 
-        {/* ✅ NEW: simple navigation tabs */}
         <div className="flex gap-3">
           <button
             onClick={() => setActivePage("home")}
@@ -217,7 +410,6 @@ const SemanticChangeApp = () => {
           </button>
         </div>
 
-        {/* ===================== ABOUT PAGE ===================== */}
         {activePage === "about" ? (
           <div className="w-full text-left bg-gray-50 border border-gray-200 rounded-2xl p-6 space-y-5">
             <h2 className="text-3xl font-bold text-indigo-700">What is ChronoWords?</h2>
@@ -228,7 +420,9 @@ const SemanticChangeApp = () => {
             </p>
 
             <div className="bg-white border border-gray-200 rounded-xl p-5">
-              <h3 className="text-xl font-semibold text-indigo-700 mb-3">What you see on the main page</h3>
+              <h3 className="text-xl font-semibold text-indigo-700 mb-3">
+                What you see on the main page
+              </h3>
 
               <div className="space-y-3 text-gray-700 leading-relaxed">
                 <p>
@@ -238,47 +432,89 @@ const SemanticChangeApp = () => {
                   <b>Word Usage Over Time</b> — how many examples were analyzed in each period.
                 </p>
                 <p>
-                  <b>Usage Examples (Clusters)</b> — sentences grouped by similar usage (often corresponding to senses).
+                  <b>Usage Examples (Clusters)</b> — sentences grouped by similar usage.
                 </p>
                 <p>
-                  <b>Axis-based Explanation</b> — interpretable “dimensions” that separate contexts (keywords + example sentences).
+                  <b>Axis-based Explanation</b> — interpretable dimensions that separate contexts.
                 </p>
                 <p>
                   <b>Words with Similar Change</b> — other words that drifted in a similar way.
                 </p>
               </div>
             </div>
-
-            <div className="bg-white border border-gray-200 rounded-xl p-5">
-              <h3 className="text-xl font-semibold text-indigo-700 mb-3">Quick tip</h3>
-              <p className="text-gray-700 leading-relaxed">
-                In the Axis-based section, each axis has two keyword lists (positive/negative) and examples for each
-                time period. The goal is to help you “see” what contexts the model associates with the word in each period.
-              </p>
-            </div>
           </div>
         ) : (
-          /* ===================== HOME PAGE (your current UI) ===================== */
           <>
             <div className="w-full flex flex-col sm:flex-row items-center space-y-4 sm:space-y-0 sm:space-x-4">
-              <Input
-                type="text"
-                placeholder="Enter a word..."
-                value={word}
-                onChange={(e) => setWord(e.target.value)}
-                className="w-full sm:w-3/4 p-4 border border-gray-300 rounded-xl shadow-lg focus:outline-none focus:ring-4 focus:ring-indigo-500 text-lg text-center"
-              />
+              <div ref={inputWrapRef} className="w-full sm:w-3/4" style={{ width: "100%" }}>
+                <Input
+                  type="text"
+                  placeholder="Enter a word..."
+                  value={word}
+                  onChange={(e) => {
+                    suppressSuggestRef.current = false;
+                    setSearchWordForCurrentInput(null);
+                    setWord(e.target.value);
+                    setShowSuggestions(true);
+                  }}
+                  onKeyDown={handleInputKeyDown}
+                  onBlur={() => {
+                    setTimeout(() => setShowSuggestions(false), 120);
+                  }}
+                  onFocus={() => {
+                    if (suggestions.length) setShowSuggestions(true);
+                  }}
+                  className="w-full p-4 border border-gray-300 rounded-xl shadow-lg focus:outline-none focus:ring-4 focus:ring-indigo-500 text-lg text-center"
+                />
+              </div>
+
               <Button
-                onClick={() => fetchSemanticChange()}
+                onClick={() => {
+                  resetSuggestions();
+                  fetchSemanticChange(searchWordForCurrentInput ?? word, word);
+                }}
                 className="w-full sm:w-1/4 p-4 bg-indigo-600 text-white font-semibold rounded-xl shadow-lg hover:bg-indigo-800 transition-all text-lg"
               >
                 Check
               </Button>
             </div>
 
+            {showSuggestions && suggestions.length > 0 && dropdownStyle && (
+              <div style={dropdownStyle}>
+                {suggestions.map((s, idx) => {
+                  const active = idx === activeSuggestionIdx;
+                  const displayWord = stripPosSuffix(s.word, s.pos);
+
+                  return (
+                    <button
+                      key={`${s.word}-${s.pos}-${idx}`}
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => handlePickSuggestion(s)}
+                      style={{
+                        display: "flex",
+                        width: "100%",
+                        justifyContent: "space-between",
+                        padding: "10px 14px",
+                        border: "none",
+                        borderBottom: "1px solid #f3f4f6",
+                        background: active ? "#eef2ff" : "white",
+                        cursor: "pointer",
+                        textAlign: "left",
+                      }}
+                    >
+                      <span style={{ fontWeight: 600 }}>{displayWord}</span>
+                      <span style={{ fontSize: 12, color: "#6b7280" }}>{s.pos}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             {wordForms.length > 0 && (
               <div className="w-full flex flex-col items-center mt-2 space-y-2">
                 <label className="text-gray-600 font-semibold text-lg">Part of Speech</label>
+
                 <select
                   className={`w-1/2 p-3 border border-gray-300 rounded-xl shadow-lg bg-white text-lg font-semibold focus:outline-none focus:ring-4 focus:ring-indigo-500 ${
                     wordForms.length === 1 ? "opacity-60 cursor-not-allowed" : ""
@@ -304,7 +540,10 @@ const SemanticChangeApp = () => {
                   <FontAwesomeIcon icon={faBrain} className="text-indigo-600 text-xl mr-2" />
                   Change Score:
                   <span className="ml-2 font-bold text-indigo-500">
-                    {selectedForm.semantic_change?.normalized_score?.toFixed(2) ?? "N/A"} –{" "}
+                    {Number.isFinite(Number(selectedForm.semantic_change?.normalized_score))
+                      ? Number(selectedForm.semantic_change.normalized_score).toFixed(2)
+                      : "N/A"}{" "}
+                    –{" "}
                     {selectedForm.semantic_change?.change_category ?? "Unknown"}
                   </span>
                 </p>
@@ -315,36 +554,23 @@ const SemanticChangeApp = () => {
                     <span className="ml-2">Word Usage Over Time</span>
                   </h3>
 
-                  {selectedForm.history.length > 0 ? (
-                    <div className="chart-container w-full">
-                      <ResponsiveContainer width="100%" height={300} className="mx-auto">
-                        <BarChart data={selectedForm.history}>
-                          <XAxis dataKey="period" tick={{ fill: "#6b46c1", fontSize: 14 }} />
-                          <YAxis tick={{ fill: "#6b46c1", fontSize: 14 }} />
-                          <Tooltip
-                            contentStyle={{
-                              backgroundColor: "#fff",
-                              color: "#333",
-                              borderRadius: 8,
-                              padding: 10,
-                              border: "1px solid #ccc",
-                            }}
-                          />
-                          <Bar
-                            dataKey="usage"
-                            fill="rgb(79, 70, 229)"
-                            radius={[10, 10, 0, 0]}
-                            barSize={40}
-                          />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  ) : (
-                    <p className="text-gray-500 italic mt-2">No usage data available.</p>
-                  )}
+                  <div className="chart-container w-full">
+                    <ResponsiveContainer width="100%" height={300} className="mx-auto">
+                      <BarChart data={selectedForm.history}>
+                        <XAxis dataKey="period" tick={{ fill: "#6b46c1", fontSize: 14 }} />
+                        <YAxis tick={{ fill: "#6b46c1", fontSize: 14 }} />
+                        <Tooltip />
+                        <Bar
+                          dataKey="usage"
+                          fill="rgb(79, 70, 229)"
+                          radius={[10, 10, 0, 0]}
+                          barSize={40}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
                 </div>
 
-                {/* CLUSTERS */}
                 <div className="mt-10 w-full bg-white border-2 border-indigo-400 rounded-3xl shadow-xl px-6 py-8">
                   <h3 className="text-2xl font-bold text-indigo-700 flex items-center mb-4">
                     <FontAwesomeIcon icon={faBookOpen} className="text-indigo-600 text-xl mr-2" />
@@ -353,7 +579,8 @@ const SemanticChangeApp = () => {
 
                   {["t1", "t2"].map((periodKey) => {
                     const clusters = selectedForm.clusters?.[periodKey];
-                    const explanation = periodKey === "t1" ? selectedForm.conclusion_t1 : selectedForm.conclusion_t2;
+                    const explanation =
+                      periodKey === "t1" ? selectedForm.conclusion_t1 : selectedForm.conclusion_t2;
                     const label = periodKey === "t1" ? "1810–1860" : "1960–2010";
 
                     return (
@@ -372,31 +599,43 @@ const SemanticChangeApp = () => {
                         </p>
 
                         {clusters &&
-                          Object.entries(clusters).map(([clusterIdx, sentences]) => (
-                            <div key={clusterIdx} className="p-4 bg-white border border-gray-300 rounded-xl shadow-sm">
-                              <h5 className="text-md font-semibold text-indigo-600 mb-3 flex items-center">
-                                <FontAwesomeIcon icon={faLayerGroup} className="mr-2" />
-                                Cluster {clusterIdx}
-                              </h5>
+                          Object.entries(clusters).map(([clusterIdx, sentences]) => {
+                            const safeSentences = Array.isArray(sentences) ? sentences : [];
 
-                              <div className="space-y-4">
-                                {sentences.map((sentence, i) => (
-                                  <div
-                                    key={i}
-                                    className="p-3 bg-gray-100 rounded-lg border-l-4 border-indigo-300 text-left whitespace-pre-wrap break-words max-w-prose mx-auto"
-                                  >
-                                    <p className="text-gray-800 italic leading-relaxed">"{sentence}"</p>
-                                  </div>
-                                ))}
+                            return (
+                              <div
+                                key={clusterIdx}
+                                className="p-4 bg-white border border-gray-300 rounded-xl shadow-sm"
+                              >
+                                <h5 className="text-md font-semibold text-indigo-600 mb-3 flex items-center">
+                                  <FontAwesomeIcon icon={faLayerGroup} className="mr-2" />
+                                  Cluster {clusterIdx}
+                                </h5>
+
+                                <div className="space-y-4">
+                                  {safeSentences.length > 0 ? (
+                                    safeSentences.map((sentence, i) => (
+                                      <div
+                                        key={i}
+                                        className="p-3 bg-gray-100 rounded-lg border-l-4 border-indigo-300 text-left whitespace-pre-wrap break-words max-w-prose mx-auto"
+                                      >
+                                        <p className="text-gray-800 italic leading-relaxed">
+                                          "{typeof sentence === "string" ? sentence : JSON.stringify(sentence)}"
+                                        </p>
+                                      </div>
+                                    ))
+                                  ) : (
+                                    <p className="text-gray-500 italic">No examples for this cluster.</p>
+                                  )}
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                       </div>
                     );
                   })}
                 </div>
 
-                {/* AXIS EXPLANATION */}
                 <div className="mt-10 w-full bg-white border-2 border-indigo-400 rounded-3xl shadow-xl px-6 py-8">
                   <div className="w-full max-w-2xl mx-auto">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
@@ -410,17 +649,8 @@ const SemanticChangeApp = () => {
                           onClick={() => setShowAllAxes((v) => !v)}
                           className="px-4 py-2 bg-gray-50 border border-indigo-200 rounded-xl shadow-sm hover:bg-indigo-50 transition-all text-sm font-semibold text-indigo-700 w-fit"
                         >
-                          {showAllAxes ? (
-                            <>
-                              <FontAwesomeIcon icon={faChevronUp} className="mr-2" />
-                              Show top 3
-                            </>
-                          ) : (
-                            <>
-                              <FontAwesomeIcon icon={faChevronDown} className="mr-2" />
-                              Show all ({totalAxesCount})
-                            </>
-                          )}
+                          <FontAwesomeIcon icon={showAllAxes ? faChevronUp : faChevronDown} className="mr-2" />
+                          {showAllAxes ? "Show top 3" : `Show all (${totalAxesCount})`}
                         </button>
                       )}
                     </div>
@@ -449,17 +679,8 @@ const SemanticChangeApp = () => {
                                   </div>
 
                                   <span className="text-sm font-semibold text-indigo-700 shrink-0">
-                                    {isOpen ? (
-                                      <>
-                                        <FontAwesomeIcon icon={faChevronUp} className="mr-2" />
-                                        Hide
-                                      </>
-                                    ) : (
-                                      <>
-                                        <FontAwesomeIcon icon={faChevronDown} className="mr-2" />
-                                        Examples
-                                      </>
-                                    )}
+                                    <FontAwesomeIcon icon={isOpen ? faChevronUp : faChevronDown} className="mr-2" />
+                                    {isOpen ? "Hide" : "Examples"}
                                   </span>
                                 </div>
 
@@ -489,7 +710,6 @@ const SemanticChangeApp = () => {
                   </div>
                 </div>
 
-                {/* SIMILAR DRIFT WORDS */}
                 <div className="mt-10 w-full bg-white border-2 border-indigo-400 rounded-3xl shadow-xl px-6 py-8">
                   <div className="w-full max-w-2xl mx-auto">
                     <h3 className="text-2xl font-bold text-indigo-700 flex items-center mb-4">
@@ -502,17 +722,20 @@ const SemanticChangeApp = () => {
                         {selectedForm.similar_drift_words.map((w, idx) => (
                           <button
                             key={idx}
-                            onClick={() => handleSimilarWordClick(w.word)}
+                            onClick={() => handleSimilarWordClick(w)}
                             className="px-4 py-2 bg-gray-50 border border-indigo-200 rounded-xl shadow-sm hover:bg-indigo-50 transition-all text-left"
                             title="Click to search"
                           >
                             <p className="text-sm font-semibold text-indigo-700">
-                              {w.word} <span className="text-gray-500">({w.pos})</span>
+                              {stripPosSuffix(w.word, w.pos)}{" "}
+                              <span className="text-gray-500">({w.pos})</span>
                             </p>
                             <p className="text-xs text-gray-600">
                               sim: {w.similarity?.toFixed?.(3) ?? w.similarity}
                             </p>
-                            <p className="text-[11px] text-gray-500">{w.method ? `method: ${w.method}` : ""}</p>
+                            <p className="text-[11px] text-gray-500">
+                              {w.method ? `method: ${w.method}` : ""}
+                            </p>
                           </button>
                         ))}
                       </div>

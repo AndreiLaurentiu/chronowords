@@ -264,3 +264,38 @@ exports.getWordDetails = async (req, res) => {
     return res.status(500).json({ error: "Internal Server Error" });
   }
 };
+
+exports.suggestWords = async (req, res) => {
+  try {
+    const q = (req.query.q || "").trim();
+    const limit = Math.min(parseInt(req.query.limit || "10", 10), 25);
+
+    if (!q || q.length < 1) return res.json([]);
+
+    // If you want to ignore case, you can use iLike on Postgres
+    // For other DBs, adapt accordingly.
+    const rows = await Word.findAll({
+      attributes: ["word", "part_of_speech"],
+      where: {
+        word: {
+          [Op.iLike]: `${q}%`, // prefix match
+        },
+      },
+      // optional: prioritize exact prefix matches naturally via order
+      order: [["word", "ASC"], ["part_of_speech", "ASC"]],
+      limit,
+    });
+
+    // Return as grouped suggestions (same word may have multiple POS)
+    // so UI can show: bank (noun), bank (verb)
+    const suggestions = rows.map((r) => ({
+      word: r.word,
+      pos: r.part_of_speech,
+    }));
+
+    return res.json(suggestions);
+  } catch (err) {
+    console.error("❌ Error suggesting words:", err);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+};

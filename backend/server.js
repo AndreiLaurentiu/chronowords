@@ -12,7 +12,7 @@ app.use(express.json());
 
 app.use("/api", apiLimiter);
 
-app.use("/api/words", heavyLimiter);
+app.use("/api/words", apiLimiter);
 
 app.use("/api", wordRoutes);
 

@@ -20,13 +20,27 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 
 const getApiBase = () => {
-  const viteApiUrl = import.meta.env.VITE_API_URL;
+  const viteApiUrl = import.meta?.env?.VITE_API_URL;
 
   if (viteApiUrl) {
     return viteApiUrl;
   }
 
-  if (import.meta.env.DEV) {
+  const reactApiUrl =
+    typeof process !== "undefined" && process.env
+      ? process.env.REACT_APP_API_URL
+      : undefined;
+
+  if (reactApiUrl) {
+    return reactApiUrl;
+  }
+
+  const isLocalhost =
+    typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1");
+
+  if (isLocalhost) {
     return "http://localhost:5000";
   }
 

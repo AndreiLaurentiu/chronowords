@@ -19,10 +19,19 @@ import {
   faHouse,
 } from "@fortawesome/free-solid-svg-icons";
 
-const getApiBase = () =>
-  import.meta.env?.VITE_API_URL ||
-  (typeof process !== "undefined" ? process.env.REACT_APP_API_URL : undefined) ||
-  "http://localhost:5000";
+const getApiBase = () => {
+  const viteApiUrl = import.meta.env.VITE_API_URL;
+
+  if (viteApiUrl) {
+    return viteApiUrl;
+  }
+
+  if (import.meta.env.DEV) {
+    return "http://localhost:5000";
+  }
+
+  return "https://chronowords-apiv2.onrender.com";
+};
 
 function useDebouncedValue(value, delayMs) {
   const [debounced, setDebounced] = React.useState(value);

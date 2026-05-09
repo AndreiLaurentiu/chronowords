@@ -1,7 +1,4 @@
 import React, { useMemo, useState } from "react";
-import Input from "./components/Input";
-import Button from "./components/Button";
-import Card from "./components/Card";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -76,6 +73,211 @@ const stripPosSuffix = (rawWord, pos) => {
   return rawWord;
 };
 
+const styles = {
+  page: {
+    minHeight: "100vh",
+    background: "linear-gradient(135deg, #60a5fa 0%, #6366f1 100%)",
+    padding: "32px",
+    boxSizing: "border-box",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "flex-start",
+    fontFamily:
+      '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+  },
+
+  shell: {
+    width: "100%",
+    maxWidth: "980px",
+    background: "white",
+    borderRadius: "28px",
+    padding: "36px",
+    boxShadow: "0 24px 70px rgba(15, 23, 42, 0.28)",
+    textAlign: "center",
+    boxSizing: "border-box",
+  },
+
+  title: {
+    margin: 0,
+    fontSize: "44px",
+    fontWeight: 900,
+    color: "#4338ca",
+    letterSpacing: "-1px",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: "12px",
+  },
+
+  nav: {
+    marginTop: "24px",
+    display: "flex",
+    justifyContent: "center",
+    gap: "12px",
+  },
+
+  navButton: {
+    padding: "10px 18px",
+    borderRadius: "999px",
+    border: "1px solid #c7d2fe",
+    background: "white",
+    color: "#374151",
+    fontSize: "15px",
+    fontWeight: 700,
+    cursor: "pointer",
+    boxShadow: "0 6px 16px rgba(15, 23, 42, 0.08)",
+    transition: "0.2s ease",
+  },
+
+  navButtonActive: {
+    padding: "10px 18px",
+    borderRadius: "999px",
+    border: "1px solid #4f46e5",
+    background: "#4f46e5",
+    color: "white",
+    fontSize: "15px",
+    fontWeight: 700,
+    cursor: "pointer",
+    boxShadow: "0 10px 22px rgba(79, 70, 229, 0.28)",
+    transition: "0.2s ease",
+  },
+
+  searchOuter: {
+    width: "100%",
+    display: "flex",
+    justifyContent: "center",
+    marginTop: "28px",
+  },
+
+  searchRow: {
+    width: "620px",
+    maxWidth: "100%",
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: "12px",
+  },
+
+  inputWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  input: {
+    width: "100%",
+    height: "48px",
+    padding: "0 18px",
+    border: "1px solid #c7d2fe",
+    borderRadius: "14px",
+    fontSize: "17px",
+    boxSizing: "border-box",
+    outline: "none",
+    boxShadow: "0 8px 20px rgba(15, 23, 42, 0.08)",
+  },
+
+  primaryButton: {
+    height: "48px",
+    padding: "0 26px",
+    backgroundColor: "#4f46e5",
+    color: "white",
+    border: "none",
+    borderRadius: "14px",
+    fontSize: "17px",
+    fontWeight: 800,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    boxShadow: "0 10px 22px rgba(79, 70, 229, 0.32)",
+  },
+
+  aboutBox: {
+    marginTop: "28px",
+    width: "100%",
+    textAlign: "left",
+    background: "#f8fafc",
+    border: "1px solid #e5e7eb",
+    borderRadius: "22px",
+    padding: "28px",
+    boxSizing: "border-box",
+  },
+
+  aboutTitle: {
+    marginTop: 0,
+    marginBottom: "14px",
+    color: "#4338ca",
+    fontSize: "30px",
+    fontWeight: 900,
+  },
+
+  aboutCard: {
+    marginTop: "20px",
+    background: "white",
+    border: "1px solid #e5e7eb",
+    borderRadius: "18px",
+    padding: "22px",
+  },
+
+  resultCard: {
+    marginTop: "32px",
+    width: "100%",
+    background: "#f8fafc",
+    borderRadius: "24px",
+    padding: "28px",
+    boxSizing: "border-box",
+    boxShadow: "0 12px 32px rgba(15, 23, 42, 0.12)",
+  },
+
+  section: {
+    marginTop: "28px",
+    width: "100%",
+    background: "white",
+    border: "1px solid #c7d2fe",
+    borderRadius: "24px",
+    padding: "26px",
+    boxSizing: "border-box",
+    boxShadow: "0 12px 30px rgba(15, 23, 42, 0.08)",
+  },
+
+  sectionTitle: {
+    marginTop: 0,
+    marginBottom: "18px",
+    color: "#4338ca",
+    fontSize: "24px",
+    fontWeight: 900,
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+  },
+
+  smallCard: {
+    background: "#f8fafc",
+    border: "1px solid #c7d2fe",
+    borderRadius: "18px",
+    padding: "20px",
+    marginBottom: "18px",
+    textAlign: "left",
+  },
+
+  exampleCard: {
+    background: "#f3f4f6",
+    borderLeft: "4px solid #818cf8",
+    borderRadius: "12px",
+    padding: "14px",
+    marginTop: "12px",
+    textAlign: "left",
+    overflowWrap: "break-word",
+  },
+
+  chipButton: {
+    padding: "12px 16px",
+    background: "#f8fafc",
+    border: "1px solid #c7d2fe",
+    borderRadius: "14px",
+    cursor: "pointer",
+    boxShadow: "0 6px 16px rgba(15, 23, 42, 0.06)",
+    textAlign: "left",
+  },
+};
+
 const SemanticChangeApp = () => {
   const [activePage, setActivePage] = useState("home");
 
@@ -96,7 +298,7 @@ const SemanticChangeApp = () => {
   const [showAllAxes, setShowAllAxes] = useState(false);
   const [expandedAxisIds, setExpandedAxisIds] = useState(new Set());
 
-  const debouncedWord = useDebouncedValue(word, 200);
+  const debouncedWord = useDebouncedValue(word, 300);
 
   const resetSuggestions = () => {
     setSuggestions([]);
@@ -115,8 +317,6 @@ const SemanticChangeApp = () => {
       if (!res.ok) throw new Error("Word not found");
 
       const raw = await res.json();
-      console.log("Fetched word:", query);
-      console.log("Raw backend response:", raw);
       const data = Array.isArray(raw) ? raw : [raw];
 
       const forms = data.map((entry) => {
@@ -166,7 +366,7 @@ const SemanticChangeApp = () => {
 
     const q = debouncedWord.trim();
 
-    if (!q) {
+    if (!q || q.length < 2) {
       resetSuggestions();
       return;
     }
@@ -180,7 +380,10 @@ const SemanticChangeApp = () => {
           `${API_BASE}/api/words/suggest?q=${encodeURIComponent(q)}&limit=10`
         );
 
-        if (!res.ok) throw new Error("suggest failed");
+        if (!res.ok) {
+          resetSuggestions();
+          return;
+        }
 
         const data = await res.json();
         if (cancelled) return;
@@ -212,15 +415,15 @@ const SemanticChangeApp = () => {
       setDropdownStyle({
         position: "fixed",
         left: r.left,
-        top: r.bottom + 6,
+        top: r.bottom + 8,
         width: r.width,
         zIndex: 9999,
         background: "white",
-        border: "1px solid #e5e7eb",
-        borderRadius: 10,
-        boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
+        border: "1px solid #c7d2fe",
+        borderRadius: 14,
+        boxShadow: "0 16px 40px rgba(15,23,42,0.16)",
         overflow: "hidden",
-        maxHeight: 240,
+        maxHeight: 260,
         overflowY: "auto",
       });
     };
@@ -330,26 +533,65 @@ const SemanticChangeApp = () => {
     const pos = ((clamped + 1) / 2) * 100;
 
     return (
-      <div className="w-full">
-        <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
-          <span className="flex items-center gap-1">
-            <FontAwesomeIcon icon={faUpRightAndDownLeftFromCenter} />
-            axis score:
+      <div style={{ width: "100%" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            fontSize: "12px",
+            color: "#6b7280",
+            marginBottom: "6px",
+          }}
+        >
+          <span>
+            <FontAwesomeIcon icon={faUpRightAndDownLeftFromCenter} /> axis score:
           </span>
-          <span className="font-semibold text-gray-800">
+          <strong style={{ color: "#374151" }}>
             {Number.isFinite(s) ? s.toFixed(3) : score ?? "—"}
-          </span>
+          </strong>
         </div>
 
-        <div className="relative h-2 rounded-full bg-gray-200 overflow-hidden">
-          <div className="absolute left-1/2 top-0 bottom-0 w-[1px] bg-gray-500/60" />
+        <div
+          style={{
+            position: "relative",
+            height: "8px",
+            borderRadius: "999px",
+            background: "#e5e7eb",
+            overflow: "hidden",
+          }}
+        >
           <div
-            className="absolute top-0 bottom-0 w-2 rounded-full bg-indigo-600"
-            style={{ left: `calc(${pos}% - 0.25rem)` }}
+            style={{
+              position: "absolute",
+              left: "50%",
+              top: 0,
+              bottom: 0,
+              width: "1px",
+              background: "#6b7280",
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              bottom: 0,
+              width: "8px",
+              borderRadius: "999px",
+              background: "#4f46e5",
+              left: `calc(${pos}% - 4px)`,
+            }}
           />
         </div>
 
-        <div className="mt-1 flex items-center justify-between text-[11px] text-gray-500">
+        <div
+          style={{
+            marginTop: "5px",
+            display: "flex",
+            justifyContent: "space-between",
+            fontSize: "11px",
+            color: "#6b7280",
+          }}
+        >
           <span>negative</span>
           <span>positive</span>
         </div>
@@ -357,149 +599,157 @@ const SemanticChangeApp = () => {
     );
   };
 
-const PillList = ({ title, items }) => {
-  const safeItems = Array.isArray(items) ? items : [];
+  const PillList = ({ title, items }) => {
+    const safeItems = Array.isArray(items) ? items : [];
 
-  return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4">
-      <p className="text-sm font-semibold text-gray-700 mb-3">{title}</p>
+    return (
+      <div
+        style={{
+          background: "white",
+          border: "1px solid #e5e7eb",
+          borderRadius: "16px",
+          padding: "16px",
+        }}
+      >
+        <p style={{ margin: "0 0 10px", fontWeight: 800, color: "#374151" }}>{title}</p>
 
-      {safeItems.length ? (
-        <p className="text-sm text-gray-800 break-words">
-          {safeItems.slice(0, 12).join(" - ")}
-        </p>
-      ) : (
-        <p className="text-sm text-gray-500 italic">—</p>
-      )}
-    </div>
-  );
-};
+        {safeItems.length ? (
+          <p style={{ margin: 0, color: "#374151", lineHeight: 1.6 }}>
+            {safeItems.slice(0, 12).join(" - ")}
+          </p>
+        ) : (
+          <p style={{ margin: 0, color: "#6b7280", fontStyle: "italic" }}>—</p>
+        )}
+      </div>
+    );
+  };
 
   const ExampleList = ({ label, examples }) => (
-    <div className="bg-white border border-gray-200 rounded-xl p-4">
-      <h5 className="text-md font-bold text-indigo-700 mb-3">{label}</h5>
+    <div
+      style={{
+        background: "white",
+        border: "1px solid #e5e7eb",
+        borderRadius: "16px",
+        padding: "16px",
+      }}
+    >
+      <h5 style={{ margin: "0 0 14px", color: "#4338ca", fontSize: "16px" }}>{label}</h5>
 
       {examples?.length ? (
-        <div className="space-y-3">
+        <div>
           {examples.slice(0, 6).map((ex, i) => (
-            <div
-              key={i}
-              className="p-3 bg-gray-100 rounded-lg border-l-4 border-indigo-300 whitespace-pre-wrap break-words"
-            >
-              <p className="text-xs text-gray-500 mb-1">
+            <div key={i} style={styles.exampleCard}>
+              <p style={{ fontSize: "12px", color: "#6b7280", margin: "0 0 6px" }}>
                 signed_score: {ex.signed_score?.toFixed?.(3) ?? ex.signed_score}
               </p>
-              <p className="text-gray-800 italic leading-relaxed">"{ex.sentence}"</p>
+              <p style={{ color: "#374151", fontStyle: "italic", lineHeight: 1.6, margin: 0 }}>
+                "{ex.sentence}"
+              </p>
             </div>
           ))}
         </div>
       ) : (
-        <p className="text-gray-500 italic">No axis examples.</p>
+        <p style={{ color: "#6b7280", fontStyle: "italic" }}>No axis examples.</p>
       )}
     </div>
   );
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-r from-blue-400 to-indigo-500 p-8">
-      <div className="w-full max-w-3xl bg-white p-10 rounded-3xl shadow-2xl flex flex-col items-center justify-center text-center space-y-6 mx-auto">
-        <h1 className="text-5xl font-extrabold text-indigo-700 shadow-lg tracking-wide flex items-center">
-          <FontAwesomeIcon icon={faClock} className="mr-4 text-indigo-600" />
+    <div style={styles.page}>
+      <div style={styles.shell}>
+        <h1 style={styles.title}>
+          <FontAwesomeIcon icon={faClock} />
           ChronoWords
         </h1>
 
-        <div className="flex gap-3">
+        <div style={styles.nav}>
           <button
+            type="button"
             onClick={() => setActivePage("home")}
-            className={`px-4 py-2 rounded-xl border shadow-sm transition ${
-              activePage === "home"
-                ? "bg-indigo-600 text-white border-indigo-600"
-                : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
-            }`}
+            style={activePage === "home" ? styles.navButtonActive : styles.navButton}
           >
-            <FontAwesomeIcon icon={faHouse} className="mr-2" />
+            <FontAwesomeIcon icon={faHouse} style={{ marginRight: "8px" }} />
             Home
           </button>
 
           <button
+            type="button"
             onClick={() => setActivePage("about")}
-            className={`px-4 py-2 rounded-xl border shadow-sm transition ${
-              activePage === "about"
-                ? "bg-indigo-600 text-white border-indigo-600"
-                : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
-            }`}
+            style={activePage === "about" ? styles.navButtonActive : styles.navButton}
           >
-            <FontAwesomeIcon icon={faCircleInfo} className="mr-2" />
+            <FontAwesomeIcon icon={faCircleInfo} style={{ marginRight: "8px" }} />
             About
           </button>
         </div>
 
         {activePage === "about" ? (
-          <div className="w-full text-left bg-gray-50 border border-gray-200 rounded-2xl p-6 space-y-5">
-            <h2 className="text-3xl font-bold text-indigo-700">What is ChronoWords?</h2>
+          <div style={styles.aboutBox}>
+            <h2 style={styles.aboutTitle}>What is ChronoWords?</h2>
 
-            <p className="text-gray-700 leading-relaxed">
-              ChronoWords is a semantic change explorer. It compares how a word is used in two time periods
-              (1810–1860 vs 1960–2010) and surfaces interpretable signals of meaning shift.
+            <p style={{ color: "#374151", lineHeight: 1.7, fontSize: "16px" }}>
+              ChronoWords is a semantic change explorer. It compares how a word is used in two
+              time periods, 1810–1860 vs 1960–2010, and surfaces interpretable signals of meaning
+              shift.
             </p>
 
-            <div className="bg-white border border-gray-200 rounded-xl p-5">
-              <h3 className="text-xl font-semibold text-indigo-700 mb-3">
-                What you see on the main page
-              </h3>
+            <div style={styles.aboutCard}>
+              <h3 style={{ color: "#4338ca", marginTop: 0 }}>What you see on the main page</h3>
 
-              <div className="space-y-3 text-gray-700 leading-relaxed">
-                <p>
-                  <b>Change Score</b> — a normalized indicator of how much the word’s meaning changed between periods.
-                </p>
-                <p>
-                  <b>Word Usage Over Time</b> — how many examples were analyzed in each period.
-                </p>
-                <p>
-                  <b>Usage Examples (Clusters)</b> — sentences grouped by similar usage.
-                </p>
-                <p>
-                  <b>Axis-based Explanation</b> — interpretable dimensions that separate contexts.
-                </p>
-                <p>
-                  <b>Words with Similar Change</b> — other words that drifted in a similar way.
-                </p>
-              </div>
+              <p>
+                <b>Change Score</b> — a normalized indicator of how much the word’s meaning changed
+                between periods.
+              </p>
+              <p>
+                <b>Word Usage Over Time</b> — how many examples were analyzed in each period.
+              </p>
+              <p>
+                <b>Usage Examples (Clusters)</b> — sentences grouped by similar usage.
+              </p>
+              <p>
+                <b>Axis-based Explanation</b> — interpretable dimensions that separate contexts.
+              </p>
+              <p>
+                <b>Words with Similar Change</b> — other words that drifted in a similar way.
+              </p>
             </div>
           </div>
         ) : (
           <>
-            <div className="w-full flex flex-col sm:flex-row items-center space-y-4 sm:space-y-0 sm:space-x-4">
-              <div ref={inputWrapRef} className="w-full sm:w-3/4" style={{ width: "100%" }}>
-                <Input
-                  type="text"
-                  placeholder="Enter a word..."
-                  value={word}
-                  onChange={(e) => {
-                    suppressSuggestRef.current = false;
-                    setSearchWordForCurrentInput(null);
-                    setWord(e.target.value);
-                    setShowSuggestions(true);
-                  }}
-                  onKeyDown={handleInputKeyDown}
-                  onBlur={() => {
-                    setTimeout(() => setShowSuggestions(false), 120);
-                  }}
-                  onFocus={() => {
-                    if (suggestions.length) setShowSuggestions(true);
-                  }}
-                  className="w-full p-4 border border-gray-300 rounded-xl shadow-lg focus:outline-none focus:ring-4 focus:ring-indigo-500 text-lg text-center"
-                />
-              </div>
+            <div style={styles.searchOuter}>
+              <div style={styles.searchRow}>
+                <div ref={inputWrapRef} style={styles.inputWrap}>
+                  <input
+                    type="text"
+                    placeholder="Enter a word..."
+                    value={word}
+                    onChange={(e) => {
+                      suppressSuggestRef.current = false;
+                      setSearchWordForCurrentInput(null);
+                      setWord(e.target.value);
+                      setShowSuggestions(true);
+                    }}
+                    onKeyDown={handleInputKeyDown}
+                    onBlur={() => {
+                      setTimeout(() => setShowSuggestions(false), 120);
+                    }}
+                    onFocus={() => {
+                      if (suggestions.length) setShowSuggestions(true);
+                    }}
+                    style={styles.input}
+                  />
+                </div>
 
-              <Button
-                onClick={() => {
-                  resetSuggestions();
-                  fetchSemanticChange(searchWordForCurrentInput ?? word, word);
-                }}
-                className="w-full sm:w-1/4 p-4 bg-indigo-600 text-white font-semibold rounded-xl shadow-lg hover:bg-indigo-800 transition-all text-lg"
-              >
-                Check
-              </Button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetSuggestions();
+                    fetchSemanticChange(searchWordForCurrentInput ?? word, word);
+                  }}
+                  style={styles.primaryButton}
+                >
+                  Check
+                </button>
+              </div>
             </div>
 
             {showSuggestions && suggestions.length > 0 && dropdownStyle && (
@@ -518,16 +768,17 @@ const PillList = ({ title, items }) => {
                         display: "flex",
                         width: "100%",
                         justifyContent: "space-between",
-                        padding: "10px 14px",
+                        padding: "12px 16px",
                         border: "none",
-                        borderBottom: "1px solid #f3f4f6",
+                        borderBottom: "1px solid #eef2ff",
                         background: active ? "#eef2ff" : "white",
                         cursor: "pointer",
                         textAlign: "left",
+                        fontSize: "15px",
                       }}
                     >
-                      <span style={{ fontWeight: 600 }}>{displayWord}</span>
-                      <span style={{ fontSize: 12, color: "#6b7280" }}>{s.pos}</span>
+                      <span style={{ fontWeight: 800 }}>{displayWord}</span>
+                      <span style={{ fontSize: 13, color: "#6b7280" }}>{s.pos}</span>
                     </button>
                   );
                 })}
@@ -535,18 +786,39 @@ const PillList = ({ title, items }) => {
             )}
 
             {wordForms.length > 0 && (
-              <div className="w-full flex flex-col items-center mt-2 space-y-2">
-                <label className="text-gray-600 font-semibold text-lg">Part of Speech</label>
+              <div style={{ marginTop: "24px" }}>
+                <label
+                  style={{
+                    display: "block",
+                    color: "#374151",
+                    fontWeight: 800,
+                    fontSize: "17px",
+                    marginBottom: "10px",
+                  }}
+                >
+                  Part of Speech
+                </label>
 
                 <select
-                  className={`w-1/2 p-3 border border-gray-300 rounded-xl shadow-lg bg-white text-lg font-semibold focus:outline-none focus:ring-4 focus:ring-indigo-500 ${
-                    wordForms.length === 1 ? "opacity-60 cursor-not-allowed" : ""
-                  }`}
                   onChange={(e) =>
                     setSelectedForm(wordForms.find((f) => f.part_of_speech === e.target.value))
                   }
                   value={selectedForm?.part_of_speech || ""}
                   disabled={wordForms.length === 1}
+                  style={{
+                    width: "260px",
+                    maxWidth: "100%",
+                    height: "46px",
+                    border: "1px solid #c7d2fe",
+                    borderRadius: "14px",
+                    padding: "0 14px",
+                    fontSize: "16px",
+                    fontWeight: 700,
+                    color: "#374151",
+                    background: "white",
+                    boxShadow: "0 8px 20px rgba(15, 23, 42, 0.08)",
+                    opacity: wordForms.length === 1 ? 0.7 : 1,
+                  }}
                 >
                   {wordForms.map((form, index) => (
                     <option key={index} value={form.part_of_speech}>
@@ -558,31 +830,64 @@ const PillList = ({ title, items }) => {
             )}
 
             {selectedForm && (
-              <Card className="w-full max-w-3xl p-8 bg-gray-100 shadow-lg rounded-xl">
-                <p className="text-xl font-semibold text-gray-700 flex items-center justify-center">
-                  <FontAwesomeIcon icon={faBrain} className="text-indigo-600 text-xl mr-2" />
+              <div style={styles.resultCard}>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "20px",
+                    fontWeight: 800,
+                    color: "#374151",
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    gap: "8px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <FontAwesomeIcon icon={faBrain} style={{ color: "#4f46e5" }} />
                   Change Score:
-                  <span className="ml-2 font-bold text-indigo-500">
+                  <span style={{ color: "#4f46e5" }}>
                     {Number.isFinite(Number(selectedForm.semantic_change?.normalized_score))
                       ? Number(selectedForm.semantic_change.normalized_score).toFixed(2)
                       : "N/A"}{" "}
-                    –{" "}
-                    {selectedForm.semantic_change?.change_category ?? "Unknown"}
+                    – {selectedForm.semantic_change?.change_category ?? "Unknown"}
                   </span>
                 </p>
 
-                <div className="mt-8 w-full flex flex-col items-center">
-                  <h3 className="text-xl font-semibold text-gray-700 mt-4 flex items-center">
-                    <FontAwesomeIcon icon={faChartSimple} className="text-indigo-600 text-2xl" />
-                    <span className="ml-2">Word Usage Over Time</span>
+                <div style={styles.section}>
+                  <h3 style={styles.sectionTitle}>
+                    <FontAwesomeIcon icon={faChartSimple} />
+                    Word Usage Over Time
                   </h3>
 
-                  <div className="chart-container w-full">
-                    <ResponsiveContainer width="100%" height={300} className="mx-auto">
+                  <div style={{ width: "100%", height: "300px" }}>
+                    <ResponsiveContainer width="100%" height={300}>
                       <BarChart data={selectedForm.history}>
                         <XAxis dataKey="period" tick={{ fill: "#6b46c1", fontSize: 14 }} />
                         <YAxis tick={{ fill: "#6b46c1", fontSize: 14 }} />
-                        <Tooltip />
+
+                        <Tooltip
+                          content={({ active, payload }) => {
+                            if (!active || !payload || payload.length === 0) return null;
+
+                            return (
+                              <div
+                                style={{
+                                  background: "white",
+                                  border: "1px solid #e5e7eb",
+                                  borderRadius: "10px",
+                                  padding: "10px 14px",
+                                  boxShadow: "0 10px 25px rgba(15, 23, 42, 0.12)",
+                                  color: "#4338ca",
+                                  fontWeight: 700,
+                                }}
+                              >
+                                usage: {payload[0]?.value}
+                              </div>
+                            );
+                          }}
+                        />
+
                         <Bar
                           dataKey="usage"
                           fill="rgb(79, 70, 229)"
@@ -594,9 +899,9 @@ const PillList = ({ title, items }) => {
                   </div>
                 </div>
 
-                <div className="mt-10 w-full bg-white border-2 border-indigo-400 rounded-3xl shadow-xl px-6 py-8">
-                  <h3 className="text-2xl font-bold text-indigo-700 flex items-center mb-4">
-                    <FontAwesomeIcon icon={faBookOpen} className="text-indigo-600 text-xl mr-2" />
+                <div style={styles.section}>
+                  <h3 style={styles.sectionTitle}>
+                    <FontAwesomeIcon icon={faBookOpen} />
                     Usage Examples (Clusters)
                   </h3>
 
@@ -607,18 +912,23 @@ const PillList = ({ title, items }) => {
                     const label = periodKey === "t1" ? "1810–1860" : "1960–2010";
 
                     return (
-                      <div
-                        key={periodKey}
-                        className="w-full bg-gray-50 border border-indigo-200 rounded-xl p-6 shadow-sm space-y-6 max-w-2xl mx-auto mb-6"
-                      >
-                        <h4 className="text-lg font-bold text-indigo-700 flex items-center">
-                          <FontAwesomeIcon icon={faClockRotateLeft} className="text-indigo-500 text-md mr-2" />
+                      <div key={periodKey} style={styles.smallCard}>
+                        <h4
+                          style={{
+                            color: "#4338ca",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            marginTop: 0,
+                          }}
+                        >
+                          <FontAwesomeIcon icon={faClockRotateLeft} />
                           Period: {label}
                         </h4>
 
-                        <p className="text-sm text-pink-600 italic flex items-center">
-                          <FontAwesomeIcon icon={faCommentDots} className="text-pink-600 mr-2" />
-                          Explanation: {explanation || "No conclusion"}
+                        <p style={{ color: "#db2777", fontStyle: "italic" }}>
+                          <FontAwesomeIcon icon={faCommentDots} /> Explanation:{" "}
+                          {explanation || "No conclusion"}
                         </p>
 
                         {clusters &&
@@ -628,29 +938,40 @@ const PillList = ({ title, items }) => {
                             return (
                               <div
                                 key={clusterIdx}
-                                className="p-4 bg-white border border-gray-300 rounded-xl shadow-sm"
+                                style={{
+                                  background: "white",
+                                  border: "1px solid #e5e7eb",
+                                  borderRadius: "16px",
+                                  padding: "16px",
+                                  marginTop: "16px",
+                                }}
                               >
-                                <h5 className="text-md font-semibold text-indigo-600 mb-3 flex items-center">
-                                  <FontAwesomeIcon icon={faLayerGroup} className="mr-2" />
-                                  Cluster {clusterIdx}
+                                <h5 style={{ color: "#4f46e5", marginTop: 0 }}>
+                                  <FontAwesomeIcon icon={faLayerGroup} /> Cluster {clusterIdx}
                                 </h5>
 
-                                <div className="space-y-4">
-                                  {safeSentences.length > 0 ? (
-                                    safeSentences.map((sentence, i) => (
-                                      <div
-                                        key={i}
-                                        className="p-3 bg-gray-100 rounded-lg border-l-4 border-indigo-300 text-left whitespace-pre-wrap break-words max-w-prose mx-auto"
+                                {safeSentences.length > 0 ? (
+                                  safeSentences.map((sentence, i) => (
+                                    <div key={i} style={styles.exampleCard}>
+                                      <p
+                                        style={{
+                                          color: "#374151",
+                                          fontStyle: "italic",
+                                          lineHeight: 1.6,
+                                          margin: 0,
+                                        }}
                                       >
-                                        <p className="text-gray-800 italic leading-relaxed">
-                                          "{typeof sentence === "string" ? sentence : JSON.stringify(sentence)}"
-                                        </p>
-                                      </div>
-                                    ))
-                                  ) : (
-                                    <p className="text-gray-500 italic">No examples for this cluster.</p>
-                                  )}
-                                </div>
+                                        "{typeof sentence === "string"
+                                          ? sentence
+                                          : JSON.stringify(sentence)}"
+                                      </p>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <p style={{ color: "#6b7280", fontStyle: "italic" }}>
+                                    No examples for this cluster.
+                                  </p>
+                                )}
                               </div>
                             );
                           })}
@@ -659,115 +980,201 @@ const PillList = ({ title, items }) => {
                   })}
                 </div>
 
-                <div className="mt-10 w-full bg-white border-2 border-indigo-400 rounded-3xl shadow-xl px-6 py-8">
-                  <div className="w-full max-w-2xl mx-auto">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-                      <h3 className="text-2xl font-bold text-indigo-700 flex items-center">
-                        <FontAwesomeIcon icon={faBrain} className="text-indigo-600 text-xl mr-2" />
-                        Axis-based Explanation
-                      </h3>
-
-                      {totalAxesCount > 3 && (
-                        <button
-                          onClick={() => setShowAllAxes((v) => !v)}
-                          className="px-4 py-2 bg-gray-50 border border-indigo-200 rounded-xl shadow-sm hover:bg-indigo-50 transition-all text-sm font-semibold text-indigo-700 w-fit"
-                        >
-                          <FontAwesomeIcon icon={showAllAxes ? faChevronUp : faChevronDown} className="mr-2" />
-                          {showAllAxes ? "Show top 3" : `Show all (${totalAxesCount})`}
-                        </button>
-                      )}
-                    </div>
-
-                    {selectedForm.axes_explanation?.length > 0 ? (
-                      <div className="space-y-4">
-                        {selectedAxes.map((ax, idx) => {
-                          const axisId = ax.axis_id;
-                          const isOpen = expandedAxisIds.has(axisId);
-                          const examplesForAxis = selectedForm.axis_examples?.[axisId] || { t1: [], t2: [] };
-
-                          return (
-                            <div key={axisId} className="bg-gray-50 border border-indigo-200 rounded-2xl shadow-sm">
-                              <button
-                                onClick={() => toggleAxisExpanded(axisId)}
-                                className="w-full text-left p-5 flex flex-col gap-3"
-                              >
-                                <div className="flex items-start justify-between gap-3">
-                                  <div>
-                                    <p className="text-sm font-semibold text-indigo-700">
-                                      #{idx + 1} • Axis {axisId}
-                                    </p>
-                                    <p className="text-base font-bold text-gray-900 leading-snug break-words">
-                                      {axisShortLabel(ax)}
-                                    </p>
-                                  </div>
-
-                                  <span className="text-sm font-semibold text-indigo-700 shrink-0">
-                                    <FontAwesomeIcon icon={isOpen ? faChevronUp : faChevronDown} className="mr-2" />
-                                    {isOpen ? "Hide" : "Examples"}
-                                  </span>
-                                </div>
-
-                                <ScoreBar score={ax.signed_projection} />
-                              </button>
-
-                              {isOpen && (
-                                <div className="px-5 pb-5">
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                                    <PillList title="Positive side keywords" items={ax.top_pos_words || []} />
-                                    <PillList title="Negative side keywords" items={ax.top_neg_words || []} />
-                                  </div>
-
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <ExampleList label="Examples (1810–1860)" examples={examplesForAxis.t1 || []} />
-                                    <ExampleList label="Examples (1960–2010)" examples={examplesForAxis.t2 || []} />
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className="text-gray-500 italic">No axis explanation available.</p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="mt-10 w-full bg-white border-2 border-indigo-400 rounded-3xl shadow-xl px-6 py-8">
-                  <div className="w-full max-w-2xl mx-auto">
-                    <h3 className="text-2xl font-bold text-indigo-700 flex items-center mb-4">
-                      <FontAwesomeIcon icon={faLayerGroup} className="text-indigo-600 text-xl mr-2" />
-                      Words with Similar Change
+                <div style={styles.section}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: "12px",
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                      marginBottom: "18px",
+                    }}
+                  >
+                    <h3 style={{ ...styles.sectionTitle, marginBottom: 0 }}>
+                      <FontAwesomeIcon icon={faBrain} />
+                      Axis-based Explanation
                     </h3>
 
-                    {selectedForm.similar_drift_words?.length > 0 ? (
-                      <div className="flex flex-wrap gap-3 justify-center">
-                        {selectedForm.similar_drift_words.map((w, idx) => (
-                          <button
-                            key={idx}
-                            onClick={() => handleSimilarWordClick(w)}
-                            className="px-4 py-2 bg-gray-50 border border-indigo-200 rounded-xl shadow-sm hover:bg-indigo-50 transition-all text-left"
-                            title="Click to search"
-                          >
-                            <p className="text-sm font-semibold text-indigo-700">
-                              {stripPosSuffix(w.word, w.pos)}{" "}
-                              <span className="text-gray-500">({w.pos})</span>
-                            </p>
-                            <p className="text-xs text-gray-600">
-                              sim: {w.similarity?.toFixed?.(3) ?? w.similarity}
-                            </p>
-                            <p className="text-[11px] text-gray-500">
-                              {w.method ? `method: ${w.method}` : ""}
-                            </p>
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-gray-500 italic">No similar-change suggestions available.</p>
+                    {totalAxesCount > 3 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowAllAxes((v) => !v)}
+                        style={{
+                          ...styles.navButton,
+                          color: "#4338ca",
+                          borderColor: "#c7d2fe",
+                        }}
+                      >
+                        <FontAwesomeIcon
+                          icon={showAllAxes ? faChevronUp : faChevronDown}
+                          style={{ marginRight: "8px" }}
+                        />
+                        {showAllAxes ? "Show top 3" : `Show all (${totalAxesCount})`}
+                      </button>
                     )}
                   </div>
+
+                  {selectedForm.axes_explanation?.length > 0 ? (
+                    <div>
+                      {selectedAxes.map((ax, idx) => {
+                        const axisId = ax.axis_id;
+                        const isOpen = expandedAxisIds.has(axisId);
+                        const examplesForAxis = selectedForm.axis_examples?.[axisId] || {
+                          t1: [],
+                          t2: [],
+                        };
+
+                        return (
+                          <div key={axisId} style={styles.smallCard}>
+                            <button
+                              type="button"
+                              onClick={() => toggleAxisExpanded(axisId)}
+                              style={{
+                                width: "100%",
+                                border: "none",
+                                background: "transparent",
+                                padding: 0,
+                                textAlign: "left",
+                                cursor: "pointer",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  gap: "12px",
+                                  alignItems: "flex-start",
+                                }}
+                              >
+                                <div>
+                                  <p
+                                    style={{
+                                      margin: "0 0 6px",
+                                      color: "#4338ca",
+                                      fontWeight: 800,
+                                    }}
+                                  >
+                                    #{idx + 1} • Axis {axisId}
+                                  </p>
+                                  <p
+                                    style={{
+                                      margin: 0,
+                                      color: "#111827",
+                                      fontWeight: 900,
+                                      lineHeight: 1.4,
+                                    }}
+                                  >
+                                    {axisShortLabel(ax)}
+                                  </p>
+                                </div>
+
+                                <span style={{ color: "#4338ca", fontWeight: 800 }}>
+                                  <FontAwesomeIcon
+                                    icon={isOpen ? faChevronUp : faChevronDown}
+                                    style={{ marginRight: "8px" }}
+                                  />
+                                  {isOpen ? "Hide" : "Examples"}
+                                </span>
+                              </div>
+
+                              <div style={{ marginTop: "14px" }}>
+                                <ScoreBar score={ax.signed_projection} />
+                              </div>
+                            </button>
+
+                            {isOpen && (
+                              <div style={{ marginTop: "18px" }}>
+                                <div
+                                  style={{
+                                    display: "grid",
+                                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                                    gap: "16px",
+                                    marginBottom: "16px",
+                                  }}
+                                >
+                                  <PillList
+                                    title="Positive side keywords"
+                                    items={ax.top_pos_words || []}
+                                  />
+                                  <PillList
+                                    title="Negative side keywords"
+                                    items={ax.top_neg_words || []}
+                                  />
+                                </div>
+
+                                <div
+                                  style={{
+                                    display: "grid",
+                                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                                    gap: "16px",
+                                  }}
+                                >
+                                  <ExampleList
+                                    label="Examples (1810–1860)"
+                                    examples={examplesForAxis.t1 || []}
+                                  />
+                                  <ExampleList
+                                    label="Examples (1960–2010)"
+                                    examples={examplesForAxis.t2 || []}
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p style={{ color: "#6b7280", fontStyle: "italic" }}>
+                      No axis explanation available.
+                    </p>
+                  )}
                 </div>
-              </Card>
+
+                <div style={styles.section}>
+                  <h3 style={styles.sectionTitle}>
+                    <FontAwesomeIcon icon={faLayerGroup} />
+                    Words with Similar Change
+                  </h3>
+
+                  {selectedForm.similar_drift_words?.length > 0 ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: "12px",
+                        justifyContent: "center",
+                      }}
+                    >
+                      {selectedForm.similar_drift_words.map((w, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => handleSimilarWordClick(w)}
+                          style={styles.chipButton}
+                          title="Click to search"
+                        >
+                          <p style={{ margin: "0 0 6px", color: "#4338ca", fontWeight: 900 }}>
+                            {stripPosSuffix(w.word, w.pos)}{" "}
+                            <span style={{ color: "#6b7280" }}>({w.pos})</span>
+                          </p>
+                          <p style={{ margin: "0 0 4px", color: "#4b5563", fontSize: "13px" }}>
+                            sim: {w.similarity?.toFixed?.(3) ?? w.similarity}
+                          </p>
+                          <p style={{ margin: 0, color: "#6b7280", fontSize: "12px" }}>
+                            {w.method ? `method: ${w.method}` : ""}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p style={{ color: "#6b7280", fontStyle: "italic" }}>
+                      No similar-change suggestions available.
+                    </p>
+                  )}
+                </div>
+              </div>
             )}
           </>
         )}

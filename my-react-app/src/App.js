@@ -187,6 +187,21 @@ const styles = {
     cursor: "pointer",
     whiteSpace: "nowrap",
     boxShadow: "0 10px 22px rgba(79, 70, 229, 0.32)",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  spinner: {
+    width: "16px",
+    height: "16px",
+    border: "2px solid rgba(255,255,255,0.45)",
+    borderTop: "2px solid white",
+    borderRadius: "50%",
+    display: "inline-block",
+    marginRight: "8px",
+    verticalAlign: "middle",
+    animation: "chronoSpin 0.8s linear infinite",
   },
 
   aboutBox: {
@@ -298,6 +313,9 @@ const SemanticChangeApp = () => {
   const [showAllAxes, setShowAllAxes] = useState(false);
   const [expandedAxisIds, setExpandedAxisIds] = useState(new Set());
 
+  const [isSearching, setIsSearching] = useState(false);
+  const searchInFlightRef = React.useRef(false);
+
   const debouncedWord = useDebouncedValue(word, 300);
 
   const resetSuggestions = () => {
@@ -309,6 +327,12 @@ const SemanticChangeApp = () => {
   const fetchSemanticChange = async (overrideWord, displayWord) => {
     const query = (overrideWord ?? searchWordForCurrentInput ?? word)?.trim();
     if (!query) return;
+
+    if (searchInFlightRef.current) return;
+
+    searchInFlightRef.current = true;
+    setIsSearching(true);
+    resetSuggestions();
 
     try {
       const API_BASE = getApiBase();
@@ -345,8 +369,6 @@ const SemanticChangeApp = () => {
       setWordForms(forms);
       setSelectedForm(forms[0] || null);
 
-      resetSuggestions();
-
       setShowAllAxes(false);
       setExpandedAxisIds(new Set());
     } catch (error) {
@@ -355,6 +377,9 @@ const SemanticChangeApp = () => {
       setWordForms([]);
       setSelectedForm(null);
       resetSuggestions();
+    } finally {
+      searchInFlightRef.current = false;
+      setIsSearching(false);
     }
   };
 
@@ -439,6 +464,7 @@ const SemanticChangeApp = () => {
   }, [showSuggestions, suggestions.length]);
 
   const handleSimilarWordClick = (w) => {
+    if (searchInFlightRef.current) return;
     if (!w) return;
 
     const displayValue = stripPosSuffix(w.word ?? w, w.pos).trim();
@@ -457,6 +483,8 @@ const SemanticChangeApp = () => {
   };
 
   const handlePickSuggestion = (sug) => {
+    if (searchInFlightRef.current) return;
+
     const searchValue = sug?.word?.trim();
     const displayValue = stripPosSuffix(sug?.word, sug?.pos).trim();
 
@@ -473,6 +501,8 @@ const SemanticChangeApp = () => {
   };
 
   const handleInputKeyDown = (e) => {
+    if (searchInFlightRef.current) return;
+
     if (!showSuggestions || suggestions.length === 0) {
       if (e.key === "Enter") {
         fetchSemanticChange(searchWordForCurrentInput ?? word, word);
@@ -656,6 +686,15 @@ const SemanticChangeApp = () => {
 
   return (
     <div style={styles.page}>
+      <style>
+        {`
+          @keyframes chronoSpin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
+        `}
+      </style>
+
       <div style={styles.shell}>
         <h1 style={styles.title}>
           <FontAwesomeIcon icon={faClock} />
@@ -722,6 +761,7 @@ const SemanticChangeApp = () => {
                     type="text"
                     placeholder="Enter a word..."
                     value={word}
+                    disabled={isSearching}
                     onChange={(e) => {
                       suppressSuggestRef.current = false;
                       setSearchWordForCurrentInput(null);
@@ -735,24 +775,39 @@ const SemanticChangeApp = () => {
                     onFocus={() => {
                       if (suggestions.length) setShowSuggestions(true);
                     }}
-                    style={styles.input}
+                    style={{
+                      ...styles.input,
+                      opacity: isSearching ? 0.75 : 1,
+                      background: isSearching ? "#f9fafb" : "white",
+                    }}
                   />
                 </div>
 
                 <button
                   type="button"
+                  disabled={isSearching || !word.trim()}
                   onClick={() => {
-                    resetSuggestions();
                     fetchSemanticChange(searchWordForCurrentInput ?? word, word);
                   }}
-                  style={styles.primaryButton}
+                  style={{
+                    ...styles.primaryButton,
+                    opacity: isSearching || !word.trim() ? 0.7 : 1,
+                    cursor: isSearching || !word.trim() ? "not-allowed" : "pointer",
+                  }}
                 >
-                  Check
+                  {isSearching ? (
+                    <>
+                      <span style={styles.spinner} />
+                      Loading...
+                    </>
+                  ) : (
+                    "Check"
+                  )}
                 </button>
               </div>
             </div>
 
-            {showSuggestions && suggestions.length > 0 && dropdownStyle && (
+            {showSuggestions && suggestions.length > 0 && dropdownStyle && !isSearching && (
               <div style={dropdownStyle}>
                 {suggestions.map((s, idx) => {
                   const active = idx === activeSuggestionIdx;
@@ -804,7 +859,7 @@ const SemanticChangeApp = () => {
                     setSelectedForm(wordForms.find((f) => f.part_of_speech === e.target.value))
                   }
                   value={selectedForm?.part_of_speech || ""}
-                  disabled={wordForms.length === 1}
+                  disabled={wordForms.length === 1 || isSearching}
                   style={{
                     width: "260px",
                     maxWidth: "100%",
@@ -817,7 +872,7 @@ const SemanticChangeApp = () => {
                     color: "#374151",
                     background: "white",
                     boxShadow: "0 8px 20px rgba(15, 23, 42, 0.08)",
-                    opacity: wordForms.length === 1 ? 0.7 : 1,
+                    opacity: wordForms.length === 1 || isSearching ? 0.7 : 1,
                   }}
                 >
                   {wordForms.map((form, index) => (
@@ -961,9 +1016,11 @@ const SemanticChangeApp = () => {
                                           margin: 0,
                                         }}
                                       >
-                                        "{typeof sentence === "string"
+                                        "
+                                        {typeof sentence === "string"
                                           ? sentence
-                                          : JSON.stringify(sentence)}"
+                                          : JSON.stringify(sentence)}
+                                        "
                                       </p>
                                     </div>
                                   ))
@@ -1151,8 +1208,13 @@ const SemanticChangeApp = () => {
                         <button
                           key={idx}
                           type="button"
+                          disabled={isSearching}
                           onClick={() => handleSimilarWordClick(w)}
-                          style={styles.chipButton}
+                          style={{
+                            ...styles.chipButton,
+                            opacity: isSearching ? 0.7 : 1,
+                            cursor: isSearching ? "not-allowed" : "pointer",
+                          }}
                           title="Click to search"
                         >
                           <p style={{ margin: "0 0 6px", color: "#4338ca", fontWeight: 900 }}>

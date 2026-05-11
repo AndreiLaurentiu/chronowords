@@ -234,11 +234,11 @@ const styles = {
   resultCard: {
     marginTop: "32px",
     width: "100%",
-    background: "#f8fafc",
-    borderRadius: "24px",
-    padding: "28px",
+    background: "transparent",
+    borderRadius: "0",
+    padding: "0",
     boxSizing: "border-box",
-    boxShadow: "0 12px 32px rgba(15, 23, 42, 0.12)",
+    boxShadow: "none",
   },
 
   section: {
@@ -888,7 +888,7 @@ const SemanticChangeApp = () => {
               <div style={styles.resultCard}>
                 <p
                   style={{
-                    margin: 0,
+                    margin: "0 0 4px",
                     fontSize: "20px",
                     fontWeight: 800,
                     color: "#374151",

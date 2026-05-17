@@ -73,6 +73,30 @@ const stripPosSuffix = (rawWord, pos) => {
   return rawWord;
 };
 
+const getPeriodLabels = (entry = {}) => {
+  const rawLabels = entry.period_labels || entry.periodLabels || {};
+
+  const t1 =
+    rawLabels.t1 ||
+    rawLabels.T1 ||
+    entry.period_label_t1 ||
+    entry.periodLabelT1 ||
+    entry.t1_label ||
+    entry.t1Label ||
+    "T1";
+
+  const t2 =
+    rawLabels.t2 ||
+    rawLabels.T2 ||
+    entry.period_label_t2 ||
+    entry.periodLabelT2 ||
+    entry.t2_label ||
+    entry.t2Label ||
+    "T2";
+
+  return { t1, t2 };
+};
+
 const styles = {
   page: {
     minHeight: "100vh",
@@ -342,27 +366,44 @@ const SemanticChangeApp = () => {
 
       const raw = await res.json();
       const data = Array.isArray(raw) ? raw : [raw];
+      console.log("RAW DATA FROM BACKEND:", data);
 
       const forms = data.map((entry) => {
+        const periodLabels = getPeriodLabels(entry);
+
+        const totalExamples = entry.total_examples || { t1: 0, t2: 0 };
+
         const history = [
-          { period: "1810–1860", usage: entry.total_examples?.t1 || 0 },
-          { period: "1960–2010", usage: entry.total_examples?.t2 || 0 },
+          {
+            period: periodLabels.t1,
+            usage: totalExamples.t1 ?? 0,
+          },
+          {
+            period: periodLabels.t2,
+            usage: totalExamples.t2 ?? 0,
+          },
         ];
 
         return {
           word: entry.word,
           part_of_speech: entry.pos,
           semantic_change: entry.semantic_change,
+
           conclusion_t1: entry.conclusion_t1,
           conclusion_t2: entry.conclusion_t2,
-          clusters: entry.clusters,
-          total_examples: entry.total_examples,
+
+          clusters: entry.clusters || {},
+          total_examples: totalExamples,
+
+          period_labels: periodLabels,
           history,
+
           axes_explanation: entry.axes_explanation || [],
           axis_examples: entry.axis_examples || {},
           similar_drift_words: entry.similar_drift_words || [],
         };
       });
+      console.log("MAPPED FORMS:", forms);
 
       setSearchWordForCurrentInput(query);
       setWord(displayWord ?? stripPosSuffix(query));
@@ -726,9 +767,8 @@ const SemanticChangeApp = () => {
             <h2 style={styles.aboutTitle}>What is ChronoWords?</h2>
 
             <p style={{ color: "#374151", lineHeight: 1.7, fontSize: "16px" }}>
-              ChronoWords is a semantic change explorer. It compares how a word is used in two
-              time periods, 1810–1860 vs 1960–2010, and surfaces interpretable signals of meaning
-              shift.
+              ChronoWords is a semantic change explorer. It compares how a word is used in two time periods and surfaces interpretable
+                  signals of meaning shift.
             </p>
 
             <div style={styles.aboutCard}>
@@ -964,7 +1004,10 @@ const SemanticChangeApp = () => {
                     const clusters = selectedForm.clusters?.[periodKey];
                     const explanation =
                       periodKey === "t1" ? selectedForm.conclusion_t1 : selectedForm.conclusion_t2;
-                    const label = periodKey === "t1" ? "1810–1860" : "1960–2010";
+                    const label =
+                      periodKey === "t1"
+                        ? selectedForm.period_labels?.t1 || "T1"
+                        : selectedForm.period_labels?.t2 || "T2";
 
                     return (
                       <div key={periodKey} style={styles.smallCard}>
@@ -1006,7 +1049,7 @@ const SemanticChangeApp = () => {
                                 </h5>
 
                                 {safeSentences.length > 0 ? (
-                                  safeSentences.map((sentence, i) => (
+                                  safeSentences.slice(0, 1).map((sentence, i) => (
                                     <div key={i} style={styles.exampleCard}>
                                       <p
                                         style={{
@@ -1168,11 +1211,11 @@ const SemanticChangeApp = () => {
                                   }}
                                 >
                                   <ExampleList
-                                    label="Examples (1810–1860)"
+                                    label={`Examples (${selectedForm.period_labels?.t1 || "T1"})`}
                                     examples={examplesForAxis.t1 || []}
                                   />
                                   <ExampleList
-                                    label="Examples (1960–2010)"
+                                    label={`Examples (${selectedForm.period_labels?.t2 || "T2"})`}
                                     examples={examplesForAxis.t2 || []}
                                   />
                                 </div>

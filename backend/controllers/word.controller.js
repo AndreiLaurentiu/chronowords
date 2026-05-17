@@ -1,7 +1,7 @@
 const { Op } = require("sequelize");
 
 const {
-  sequelize, // 👈 important pentru raw queries (ai nevoie ca models/index.js să exporte sequelize)
+  sequelize,
   Word,
   SemanticChange,
   Text,
@@ -15,24 +15,14 @@ const {
 
 exports.getWordDetails = async (req, res) => {
   console.log("🔥 HIT getWordDetails:", req.method, req.originalUrl);
+
   try {
     const { word: wordParam } = req.params;
 
-    // 1) Base word + clusters + semantic score
+    // 1) Base word + semantic score
     const words = await Word.findAll({
       where: { word: wordParam },
       include: [
-        {
-          model: ClusterAssignment,
-          as: "clusters",
-          include: [
-            {
-              model: Text,
-              as: "text",
-              include: [{ model: Dataset, as: "dataset" }],
-            },
-          ],
-        },
         {
           model: SemanticChange,
           as: "semanticChanges",
@@ -47,21 +37,24 @@ exports.getWordDetails = async (req, res) => {
     const wordIds = words.map((w) => w.id);
 
     // -------------------------
-    // DEBUG (optional but recommended)
+    // DEBUG optional
+    // Use: /api/words/change?debug=1
     // -------------------------
     const debug = req.query.debug === "1";
+
     if (debug) {
       const wid = wordIds[0];
 
-      // raw counts from THE SAME backend connection
       const [[rawCntExpl]] = await sequelize.query(
         `SELECT COUNT(*)::int AS c FROM "WordAxisExplanations" WHERE word_id = :wid`,
         { replacements: { wid } }
       );
+
       const [[rawCntEx]] = await sequelize.query(
         `SELECT COUNT(*)::int AS c FROM "WordAxisExamples" WHERE word_id = :wid`,
         { replacements: { wid } }
       );
+
       const [[rawCntSim]] = await sequelize.query(
         `SELECT COUNT(*)::int AS c FROM "WordSimilarDrift" WHERE word_id = :wid`,
         { replacements: { wid } }
@@ -74,18 +67,65 @@ exports.getWordDetails = async (req, res) => {
         similar: rawCntSim.c,
       });
 
-      // quick sequelize sanity for wid
-      const seqExpl = await WordAxisExplanation.findAll({ where: { word_id: wid }, limit: 1 });
-      console.log("[DEBUG] Sequelize explanations len (wid):", seqExpl.length, seqExpl[0]?.toJSON?.());
+      const seqExpl = await WordAxisExplanation.findAll({
+        where: { word_id: wid },
+        limit: 1,
+      });
+
+      console.log(
+        "[DEBUG] Sequelize explanations len (wid):",
+        seqExpl.length,
+        seqExpl[0]?.toJSON?.()
+      );
     }
 
-    // 2) total_examples (batched)
+    // 2) Texts for total_examples and period labels
     const allTexts = await Text.findAll({
       where: { word_id: { [Op.in]: wordIds } },
       include: [{ model: Dataset, as: "dataset" }],
     });
 
-    // 3) Axes explanations (top axes per word_id)
+    console.log("allTexts length =", allTexts.length);
+
+    if (allTexts[0]) {
+      console.log(
+        "allTexts sample =",
+        allTexts[0].toJSON?.() ?? allTexts[0]
+      );
+
+      console.log(
+        "allTexts sample dataset =",
+        allTexts[0].dataset?.toJSON?.() ?? allTexts[0].dataset
+      );
+    }
+
+    // 3) Cluster assignments separately
+    // Important: nu ne mai bazăm pe word.clusters, pentru că era gol.
+    const clusterAssignmentsAll = await ClusterAssignment.findAll({
+      where: { word_id: { [Op.in]: wordIds } },
+      include: [
+        {
+          model: Text,
+          as: "text",
+          include: [{ model: Dataset, as: "dataset" }],
+        },
+      ],
+      order: [
+        ["word_id", "ASC"],
+        ["cluster_index", "ASC"],
+      ],
+    });
+
+    console.log("clusterAssignmentsAll length =", clusterAssignmentsAll.length);
+
+    if (clusterAssignmentsAll[0]) {
+      console.log(
+        "clusterAssignmentsAll sample =",
+        clusterAssignmentsAll[0].toJSON?.() ?? clusterAssignmentsAll[0]
+      );
+    }
+
+    // 4) Axes explanations
     const axisExplanationsAll = await WordAxisExplanation.findAll({
       where: { word_id: { [Op.in]: wordIds } },
       include: [{ model: Axis, as: "axis" }],
@@ -96,33 +136,51 @@ exports.getWordDetails = async (req, res) => {
     });
 
     console.log("axisExplanationsAll length =", axisExplanationsAll.length);
-    if (axisExplanationsAll[0]) console.log("axisExplanationsAll sample =", axisExplanationsAll[0].toJSON?.() ?? axisExplanationsAll[0]);
 
+    if (axisExplanationsAll[0]) {
+      console.log(
+        "axisExplanationsAll sample =",
+        axisExplanationsAll[0].toJSON?.() ?? axisExplanationsAll[0]
+      );
+    }
 
     // Group explanations per word_id, keep top K
     const TOP_K_AXES = 8;
-    const axesByWordId = new Map(); // word_id -> array
+    const axesByWordId = new Map();
 
     for (const ax of axisExplanationsAll) {
       const wid = Number(ax.word_id);
-      if (!axesByWordId.has(wid)) axesByWordId.set(wid, []);
+
+      if (!axesByWordId.has(wid)) {
+        axesByWordId.set(wid, []);
+      }
+
       const arr = axesByWordId.get(wid);
-      if (arr.length < TOP_K_AXES) arr.push(ax);
+
+      if (arr.length < TOP_K_AXES) {
+        arr.push(ax);
+      }
     }
 
-    // Collect axis_ids we need examples for (only from selected top axes)
+    // Collect axis_ids needed for examples
     const axisIdsNeeded = new Set();
+
     for (const arr of axesByWordId.values()) {
       for (const ax of arr) {
         const axObj = ax.toJSON ? ax.toJSON() : ax;
         const aid = axObj.axis_id ?? axObj.axisId;
-        if (aid != null) axisIdsNeeded.add(aid);
+
+        if (aid != null) {
+          axisIdsNeeded.add(aid);
+        }
       }
     }
+
     const axisIdsList = Array.from(axisIdsNeeded);
 
-    // 4) Axis examples (for these word_ids + these axis_ids)
+    // 5) Axis examples
     let axisExamplesAll = [];
+
     if (axisIdsList.length > 0) {
       axisExamplesAll = await WordAxisExample.findAll({
         where: {
@@ -137,8 +195,8 @@ exports.getWordDetails = async (req, res) => {
         ],
       });
     }
-    console.log("axisExamplesAll length =", axisExamplesAll.length);
 
+    console.log("axisExamplesAll length =", axisExamplesAll.length);
 
     // Build map: word_id -> axis_id -> { t1: [], t2: [] }
     const MAX_EXAMPLES_PER_PERIOD = 6;
@@ -149,13 +207,25 @@ exports.getWordDetails = async (req, res) => {
       const aid = Number(ex.axis_id);
       const period = ex.period;
 
-      if (!examplesByWord.has(wid)) examplesByWord.set(wid, {});
+      if (!examplesByWord.has(wid)) {
+        examplesByWord.set(wid, {});
+      }
+
       const wmap = examplesByWord.get(wid);
 
-      if (!wmap[aid]) wmap[aid] = { t1: [], t2: [] };
+      if (!wmap[aid]) {
+        wmap[aid] = { t1: [], t2: [] };
+      }
+
+      if (!wmap[aid][period]) {
+        wmap[aid][period] = [];
+      }
 
       const bucket = wmap[aid][period];
-      if (bucket.length >= MAX_EXAMPLES_PER_PERIOD) continue;
+
+      if (bucket.length >= MAX_EXAMPLES_PER_PERIOD) {
+        continue;
+      }
 
       bucket.push({
         signed_score: ex.signed_score,
@@ -163,7 +233,7 @@ exports.getWordDetails = async (req, res) => {
       });
     }
 
-    // 5) Similar drift words
+    // 6) Similar drift words
     const similarAll = await WordSimilarDrift.findAll({
       where: { word_id: { [Op.in]: wordIds } },
       include: [{ model: Word, as: "neighbor" }],
@@ -172,8 +242,8 @@ exports.getWordDetails = async (req, res) => {
         ["similarity", "DESC"],
       ],
     });
-    console.log("similarAll length =", similarAll.length);
 
+    console.log("similarAll length =", similarAll.length);
 
     // Group: word_id -> top N neighbors
     const TOP_N_SIMILAR = 10;
@@ -181,9 +251,16 @@ exports.getWordDetails = async (req, res) => {
 
     for (const s of similarAll) {
       const wid = Number(s.word_id);
-      if (!similarByWordId.has(wid)) similarByWordId.set(wid, []);
+
+      if (!similarByWordId.has(wid)) {
+        similarByWordId.set(wid, []);
+      }
+
       const arr = similarByWordId.get(wid);
-      if (arr.length >= TOP_N_SIMILAR) continue;
+
+      if (arr.length >= TOP_N_SIMILAR) {
+        continue;
+      }
 
       arr.push({
         word: s.neighbor?.word ?? null,
@@ -193,40 +270,172 @@ exports.getWordDetails = async (req, res) => {
       });
     }
 
-    // 6) Build response per POS variant
+    // 7) Helpers for t1 / t2 detection
+    const isT1Dataset = (dataset) => {
+      if (!dataset) return false;
+
+      const name = String(dataset.name || "").toLowerCase();
+      const timePeriod = String(dataset.time_period || "").toLowerCase();
+
+      return (
+        name === "semeval_c1" ||
+        name.endsWith("_c1") ||
+        name.includes("c1") ||
+        timePeriod === "1790-1918" ||
+        timePeriod === "1810-1860" ||
+        timePeriod.includes("1790") ||
+        timePeriod.includes("1810")
+      );
+    };
+
+    const isT2Dataset = (dataset) => {
+      if (!dataset) return false;
+
+      const name = String(dataset.name || "").toLowerCase();
+      const timePeriod = String(dataset.time_period || "").toLowerCase();
+
+      return (
+        name === "semeval_c2" ||
+        name.endsWith("_c2") ||
+        name.includes("c2") ||
+        timePeriod === "2000-present" ||
+        timePeriod === "2000-2025" ||
+        timePeriod === "1960-2010" ||
+        timePeriod.includes("2000") ||
+        timePeriod.includes("1960")
+      );
+    };
+
+    const getPeriodKeyFromDataset = (dataset) => {
+      if (isT1Dataset(dataset)) return "t1";
+      if (isT2Dataset(dataset)) return "t2";
+      return null;
+    };
+
+    const getPeriodLabelFromDataset = (dataset, fallback) => {
+      if (!dataset) return fallback;
+
+      return (
+        dataset.time_period ||
+        dataset.period ||
+        dataset.period_label ||
+        dataset.label ||
+        fallback
+      );
+    };
+
+    // 8) Build response per POS variant
     const results = words.map((word) => {
       const clusters = { t1: {}, t2: {} };
+      const periodLabels = { t1: null, t2: null };
+      const totalExamples = { t1: 0, t2: 0 };
 
-      (word.clusters || []).forEach((assignment) => {
-        const dataset = assignment.text?.dataset;
-        if (!dataset) return;
+      const wordIdNumber = Number(word.id);
 
-        const period = dataset.name === "Semeval_c1" ? "t1" : "t2";
-        const clusterIdx = assignment.cluster_index;
+      // 8.1 Build total_examples from Text rows
+      const textsForThisWord = allTexts.filter(
+        (text) => Number(text.word_id) === wordIdNumber
+      );
 
-        if (!clusters[period][clusterIdx]) clusters[period][clusterIdx] = [];
-        clusters[period][clusterIdx].push(assignment.text.content);
+      textsForThisWord.forEach((text) => {
+        const dataset = text.dataset;
+
+        if (!dataset) {
+          console.warn(
+            "[WARN] Text has no dataset:",
+            text.toJSON?.() ?? text
+          );
+          return;
+        }
+
+        const periodKey = getPeriodKeyFromDataset(dataset);
+
+        if (!periodKey) {
+          console.warn(
+            "[WARN] Could not classify text dataset as t1/t2:",
+            dataset.toJSON?.() ?? dataset
+          );
+          return;
+        }
+
+        totalExamples[periodKey] += 1;
+
+        if (!periodLabels[periodKey]) {
+          periodLabels[periodKey] = getPeriodLabelFromDataset(
+            dataset,
+            periodKey === "t1" ? "T1" : "T2"
+          );
+        }
       });
 
+      // 8.2 Build clusters from ClusterAssignment rows
+      const assignmentsForThisWord = clusterAssignmentsAll.filter(
+        (assignment) => Number(assignment.word_id) === wordIdNumber
+      );
+
+      assignmentsForThisWord.forEach((assignment) => {
+        const dataset = assignment.text?.dataset;
+
+        if (!dataset) {
+          console.warn(
+            "[WARN] Cluster assignment has no dataset:",
+            assignment.toJSON?.() ?? assignment
+          );
+          return;
+        }
+
+        const periodKey = getPeriodKeyFromDataset(dataset);
+
+        if (!periodKey) {
+          console.warn(
+            "[WARN] Could not classify cluster dataset as t1/t2:",
+            dataset.toJSON?.() ?? dataset
+          );
+          return;
+        }
+
+        if (!periodLabels[periodKey]) {
+          periodLabels[periodKey] = getPeriodLabelFromDataset(
+            dataset,
+            periodKey === "t1" ? "T1" : "T2"
+          );
+        }
+
+        const clusterIdx = assignment.cluster_index ?? "unknown";
+
+        if (!clusters[periodKey][clusterIdx]) {
+          clusters[periodKey][clusterIdx] = [];
+        }
+
+        if (assignment.text?.content) {
+          clusters[periodKey][clusterIdx].push(assignment.text.content);
+        }
+      });
+
+      const firstAssignmentForThisWord = assignmentsForThisWord[0];
+
+      const conclusion_t1 =
+        firstAssignmentForThisWord?.conclusion_t1 ||
+        firstAssignmentForThisWord?.dataValues?.conclusion_t1 ||
+        null;
+
+      const conclusion_t2 =
+        firstAssignmentForThisWord?.conclusion_t2 ||
+        firstAssignmentForThisWord?.dataValues?.conclusion_t2 ||
+        null;
+
       const semantic = word.semanticChanges?.[0] || {};
+
       const semantic_change =
-        semantic.normalized_score !== undefined
+        semantic.normalized_score !== undefined && semantic.normalized_score !== null
           ? {
               normalized_score: semantic.normalized_score,
               change_category: semantic.change_category,
             }
           : null;
 
-      const conclusion_t1 = word.clusters?.[0]?.conclusion_t1 || null;
-      const conclusion_t2 = word.clusters?.[0]?.conclusion_t2 || null;
+      const axisExplanations = axesByWordId.get(wordIdNumber) || [];
 
-      const textsForThisWord = allTexts.filter((t) => t.word_id === word.id);
-      const total_examples = {
-        t1: textsForThisWord.filter((t) => t.dataset?.name === "Semeval_c1").length,
-        t2: textsForThisWord.filter((t) => t.dataset?.name === "Semeval_c2").length,
-      };
-
-      const axisExplanations = axesByWordId.get(word.id) || [];
       const axes_explanation = axisExplanations.map((ax) => ({
         axis_id: ax.axis_id ?? ax.axisId,
         rank: ax.rank,
@@ -237,26 +446,54 @@ exports.getWordDetails = async (req, res) => {
         change_weight: ax.axis?.change_weight ?? null,
       }));
 
-      const axis_examples = examplesByWord.get(word.id) || {};
-      const similar_drift_words = similarByWordId.get(word.id) || [];
+      const axis_examples = examplesByWord.get(wordIdNumber) || {};
+      const similar_drift_words = similarByWordId.get(wordIdNumber) || [];
 
-      return {
+      const responseItem = {
         word: word.word,
         pos: word.part_of_speech,
         semantic_change,
         conclusion_t1,
         conclusion_t2,
+
         clusters,
-        total_examples,
+
+        total_examples: {
+          t1: totalExamples.t1,
+          t2: totalExamples.t2,
+        },
+
+        period_labels: {
+          t1: periodLabels.t1 || "T1",
+          t2: periodLabels.t2 || "T2",
+        },
 
         axes_explanation,
         axis_examples,
         similar_drift_words,
       };
+
+      console.log("[DEBUG] response item:", {
+        word: responseItem.word,
+        pos: responseItem.pos,
+        total_examples: responseItem.total_examples,
+        period_labels: responseItem.period_labels,
+        clusters_t1_count: Object.values(responseItem.clusters.t1).flat().length,
+        clusters_t2_count: Object.values(responseItem.clusters.t2).flat().length,
+      });
+
+      return responseItem;
     });
 
-    console.log("results[0] axes_explanation len =", results?.[0]?.axes_explanation?.length);
-    console.log("results[0] similar_drift_words len =", results?.[0]?.similar_drift_words?.length);
+    console.log(
+      "results[0] axes_explanation len =",
+      results?.[0]?.axes_explanation?.length
+    );
+
+    console.log(
+      "results[0] similar_drift_words len =",
+      results?.[0]?.similar_drift_words?.length
+    );
 
     return res.json(results);
   } catch (error) {
@@ -270,24 +507,24 @@ exports.suggestWords = async (req, res) => {
     const q = (req.query.q || "").trim();
     const limit = Math.min(parseInt(req.query.limit || "10", 10), 25);
 
-    if (!q || q.length < 1) return res.json([]);
+    if (!q || q.length < 1) {
+      return res.json([]);
+    }
 
-    // If you want to ignore case, you can use iLike on Postgres
-    // For other DBs, adapt accordingly.
     const rows = await Word.findAll({
       attributes: ["word", "part_of_speech"],
       where: {
         word: {
-          [Op.iLike]: `${q}%`, // prefix match
+          [Op.iLike]: `${q}%`,
         },
       },
-      // optional: prioritize exact prefix matches naturally via order
-      order: [["word", "ASC"], ["part_of_speech", "ASC"]],
+      order: [
+        ["word", "ASC"],
+        ["part_of_speech", "ASC"],
+      ],
       limit,
     });
 
-    // Return as grouped suggestions (same word may have multiple POS)
-    // so UI can show: bank (noun), bank (verb)
     const suggestions = rows.map((r) => ({
       word: r.word,
       pos: r.part_of_speech,

@@ -1,5 +1,16 @@
 const { Op } = require("sequelize");
 
+const path = require("path");
+const { spawn } = require("child_process");
+const { GoogleGenAI } = require("@google/genai");
+
+const gemini = process.env.GEMINI_API_KEY
+  ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
+  : null;
+
+  console.log("GEMINI loaded in controller:", !!process.env.GEMINI_API_KEY);
+console.log("gemini client exists:", !!gemini);
+
 const {
   sequelize,
   Word,
@@ -534,5 +545,321 @@ exports.suggestWords = async (req, res) => {
   } catch (err) {
     console.error("❌ Error suggesting words:", err);
     return res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+const isT1DatasetForSense = (dataset) => {
+  if (!dataset) return false;
+
+  const name = String(dataset.name || "").toLowerCase();
+  const timePeriod = String(dataset.time_period || "").toLowerCase();
+
+  return (
+    name === "semeval_c1" ||
+    name.endsWith("_c1") ||
+    name.includes("c1") ||
+    timePeriod === "1790-1918" ||
+    timePeriod === "1810-1860" ||
+    timePeriod.includes("1790") ||
+    timePeriod.includes("1810")
+  );
+};
+
+const isT2DatasetForSense = (dataset) => {
+  if (!dataset) return false;
+
+  const name = String(dataset.name || "").toLowerCase();
+  const timePeriod = String(dataset.time_period || "").toLowerCase();
+
+  return (
+    name === "semeval_c2" ||
+    name.endsWith("_c2") ||
+    name.includes("c2") ||
+    timePeriod === "2000-present" ||
+    timePeriod === "2000-2025" ||
+    timePeriod === "1960-2010" ||
+    timePeriod.includes("2000") ||
+    timePeriod.includes("1960")
+  );
+};
+
+const getSensePeriodKey = (dataset) => {
+  if (isT1DatasetForSense(dataset)) return "t1";
+  if (isT2DatasetForSense(dataset)) return "t2";
+  return "unknown";
+};
+
+const getSensePeriodLabel = (dataset, fallback) => {
+  return dataset?.time_period || fallback;
+};
+
+const runPythonSenseMatcher = (payload) => {
+  return new Promise((resolve, reject) => {
+    const pythonPath = process.env.PYTHON_PATH || "python";
+    const scriptPath = path.join(__dirname, "..", "scripts", "sense_matcher.py");
+
+    const child = spawn(pythonPath, [scriptPath], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (data) => {
+      stdout += data.toString();
+    });
+
+    child.stderr.on("data", (data) => {
+      stderr += data.toString();
+    });
+
+    child.on("error", (error) => {
+      reject(error);
+    });
+
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`Python matcher failed with code ${code}: ${stderr}`));
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(stdout);
+        resolve(parsed);
+      } catch (error) {
+        reject(
+          new Error(
+            `Could not parse Python output. Error: ${error.message}. Output: ${stdout}. Stderr: ${stderr}`
+          )
+        );
+      }
+    });
+
+    child.stdin.write(JSON.stringify(payload));
+    child.stdin.end();
+  });
+};
+
+const buildLLMSenseInterpretation = async ({
+  word,
+  pos,
+  sense,
+  keywords,
+  periodLabels,
+  matches,
+}) => {
+  if (!gemini) {
+    return {
+      interpretation:
+        "LLM interpretation is not available because GEMINI_API_KEY is not configured.",
+    };
+  }
+
+  const compactMatches = {
+    t1: (matches.t1 || []).slice(0, 4).map((m) => ({
+      similarity: m.similarity,
+      sentence: String(m.sentence || "")
+        .replaceAll("_nn", "")
+        .replaceAll("_vb", "")
+        .replaceAll("_adj", "")
+        .replaceAll("_adv", ""),
+    })),
+    t2: (matches.t2 || []).slice(0, 4).map((m) => ({
+      similarity: m.similarity,
+      sentence: String(m.sentence || "")
+        .replaceAll("_nn", "")
+        .replaceAll("_vb", "")
+        .replaceAll("_adj", "")
+        .replaceAll("_adv", ""),
+    })),
+  };
+
+  const prompt = `
+  You are helping interpret a semantic change exploration result.
+
+  Target word: ${word}
+  Part of speech: ${pos}
+  User proposed sense: ${sense}
+  Optional keywords: ${(keywords || []).join(", ") || "none"}
+
+  Period 1 label: ${periodLabels.t1}
+  Top matching examples from period 1:
+  ${JSON.stringify(compactMatches.t1, null, 2)}
+
+  Period 2 label: ${periodLabels.t2}
+  Top matching examples from period 2:
+  ${JSON.stringify(compactMatches.t2, null, 2)}
+
+  Write a short interpretation in 4-6 sentences.
+  Be careful: do not claim definitive semantic change.
+  Do not say that a sense did not exist historically.
+  Only say whether the proposed sense is supported or not supported by the retrieved examples.
+  Say whether the proposed sense appears more supported in period 1, period 2, both, or neither.
+  Use the examples and similarity scores as evidence.
+  Use simple academic English.
+  `;
+
+  const response = await gemini.models.generateContent({
+    model: "gemini-2.5-flash",
+    contents: prompt,
+  });
+
+  return {
+    interpretation: response.text,
+  };
+};
+
+exports.exploreSense = async (req, res) => {
+  try {
+    const {
+      word,
+      pos = "nn",
+      sense,
+      keywords = [],
+      topK = 5,
+      maxExamplesPerPeriod = 80,
+    } = req.body;
+
+    if (!word || !sense) {
+      return res.status(400).json({
+        error: "Missing required fields: word and sense.",
+      });
+    }
+
+    const cleanWord = String(word).trim().toLowerCase();
+    const cleanPos = String(pos).trim().toLowerCase();
+    const cleanSense = String(sense).trim();
+
+    const targetWord = await Word.findOne({
+      where: {
+        word: cleanWord,
+        part_of_speech: cleanPos,
+      },
+    });
+
+    if (!targetWord) {
+      return res.status(404).json({
+        error: `Word not found for ${cleanWord}/${cleanPos}.`,
+      });
+    }
+
+    const texts = await Text.findAll({
+      where: {
+        word_id: targetWord.id,
+      },
+      include: [{ model: Dataset, as: "dataset" }],
+      order: [["id", "ASC"]],
+    });
+
+    if (!texts || texts.length === 0) {
+      return res.status(404).json({
+        error: "No text examples found for this word.",
+      });
+    }
+
+    const periodLabels = {
+      t1: "T1",
+      t2: "T2",
+    };
+
+    const examplesByPeriod = {
+      t1: [],
+      t2: [],
+      unknown: [],
+    };
+
+    for (const text of texts) {
+      const dataset = text.dataset;
+      const period = getSensePeriodKey(dataset);
+
+      if (period === "t1" && periodLabels.t1 === "T1") {
+        periodLabels.t1 = getSensePeriodLabel(dataset, "T1");
+      }
+
+      if (period === "t2" && periodLabels.t2 === "T2") {
+        periodLabels.t2 = getSensePeriodLabel(dataset, "T2");
+      }
+
+      examplesByPeriod[period].push({
+        text_id: text.id,
+        sentence: text.content,
+        period,
+        dataset: dataset
+          ? {
+              id: dataset.id,
+              name: dataset.name,
+              time_period: dataset.time_period,
+            }
+          : null,
+      });
+    }
+
+    const sampledExamples = [
+      ...examplesByPeriod.t1.slice(0, maxExamplesPerPeriod),
+      ...examplesByPeriod.t2.slice(0, maxExamplesPerPeriod),
+      ...examplesByPeriod.unknown.slice(0, maxExamplesPerPeriod),
+    ];
+
+    const senseForMatching =
+      Array.isArray(keywords) && keywords.length > 0
+        ? `${cleanSense}. Related keywords: ${keywords.join(", ")}`
+        : cleanSense;
+
+    const matcherResult = await runPythonSenseMatcher({
+      sense: senseForMatching,
+      examples: sampledExamples,
+      topK,
+    });
+
+    const matches = matcherResult.matches || {
+      t1: [],
+      t2: [],
+      unknown: [],
+    };
+
+    let llmResult;
+
+    try {
+      llmResult = await buildLLMSenseInterpretation({
+        word: cleanWord,
+        pos: cleanPos,
+        sense: cleanSense,
+        keywords,
+        periodLabels,
+        matches,
+      });
+    } catch (error) {
+      console.error("LLM interpretation failed:", error.message);
+
+      llmResult = {
+        interpretation:
+          "LLM interpretation could not be generated. The examples below were retrieved using MiniLM semantic similarity, but the LLM API call failed.",
+      };
+    }
+
+    return res.json({
+      word: cleanWord,
+      pos: cleanPos,
+      proposed_sense: cleanSense,
+      keywords,
+      period_labels: periodLabels,
+      total_examples_available: {
+        t1: examplesByPeriod.t1.length,
+        t2: examplesByPeriod.t2.length,
+        unknown: examplesByPeriod.unknown.length,
+      },
+      total_examples_checked: sampledExamples.length,
+      matches,
+      interpretation: llmResult.interpretation,
+      note:
+        "This is a POC. It uses MiniLM semantic similarity for retrieving examples and an LLM for a short interpretation.",
+    });
+  } catch (error) {
+    console.error("❌ Error in exploreSense:", error);
+
+    return res.status(500).json({
+      error: "Internal Server Error",
+      details: error.message,
+    });
   }
 };

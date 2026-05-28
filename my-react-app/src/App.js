@@ -138,6 +138,7 @@ const styles = {
     display: "flex",
     justifyContent: "center",
     gap: "12px",
+    flexWrap: "wrap",
   },
 
   navButton: {
@@ -340,6 +341,19 @@ const SemanticChangeApp = () => {
   const [isSearching, setIsSearching] = useState(false);
   const searchInFlightRef = React.useRef(false);
 
+  // Sense Explorer state
+  const [senseWord, setSenseWord] = useState("power");
+  const [sensePos, setSensePos] = useState("nn");
+  const [senseDescription, setSenseDescription] = useState(
+    "energy or electricity produced from wind, solar, hydro or nuclear sources"
+  );
+  const [senseKeywords, setSenseKeywords] = useState(
+    "energy, electricity, wind, solar, hydro, nuclear"
+  );
+  const [senseResult, setSenseResult] = useState(null);
+  const [isExploringSense, setIsExploringSense] = useState(false);
+  const [senseError, setSenseError] = useState("");
+
   const debouncedWord = useDebouncedValue(word, 300);
 
   const resetSuggestions = () => {
@@ -366,11 +380,9 @@ const SemanticChangeApp = () => {
 
       const raw = await res.json();
       const data = Array.isArray(raw) ? raw : [raw];
-      console.log("RAW DATA FROM BACKEND:", data);
 
       const forms = data.map((entry) => {
         const periodLabels = getPeriodLabels(entry);
-
         const totalExamples = entry.total_examples || { t1: 0, t2: 0 };
 
         const history = [
@@ -403,7 +415,6 @@ const SemanticChangeApp = () => {
           similar_drift_words: entry.similar_drift_words || [],
         };
       });
-      console.log("MAPPED FORMS:", forms);
 
       setSearchWordForCurrentInput(query);
       setWord(displayWord ?? stripPosSuffix(query));
@@ -598,6 +609,101 @@ const SemanticChangeApp = () => {
     return `${left || "—"} ↔ ${right || "—"}`;
   };
 
+  const cleanDisplaySentence = (sentence) => {
+    return String(sentence || "")
+      .replaceAll("_nn", "")
+      .replaceAll("_vb", "")
+      .replaceAll("_adj", "")
+      .replaceAll("_adv", "");
+  };
+
+  const getMatchStrength = (score) => {
+    const s = Number(score);
+
+    if (!Number.isFinite(s)) return "unknown";
+    if (s >= 0.6) return "strong match";
+    if (s >= 0.35) return "moderate match";
+    return "weak match";
+  };
+
+  const getBestScore = (items = []) => {
+    if (!items.length) return 0;
+    return Math.max(...items.map((item) => Number(item.similarity) || 0));
+  };
+
+  const buildSenseVerdict = (result) => {
+    if (!result?.matches) return "";
+
+    const t1Best = getBestScore(result.matches.t1 || []);
+    const t2Best = getBestScore(result.matches.t2 || []);
+
+    if (t1Best === 0 && t2Best === 0) {
+      return "Not enough evidence was found for this proposed sense.";
+    }
+
+    if (Math.abs(t1Best - t2Best) < 0.05) {
+      return "The proposed sense appears with similar support in both periods.";
+    }
+
+    if (t2Best > t1Best) {
+      return `The proposed sense appears more strongly in ${
+        result.period_labels?.t2 || "T2"
+      }.`;
+    }
+
+    return `The proposed sense appears more strongly in ${
+      result.period_labels?.t1 || "T1"
+    }.`;
+  };
+
+  const exploreSense = async () => {
+    if (!senseWord.trim() || !senseDescription.trim()) {
+      setSenseError("Please enter a word and a proposed sense.");
+      return;
+    }
+
+    setIsExploringSense(true);
+    setSenseError("");
+    setSenseResult(null);
+
+    try {
+      const API_BASE = getApiBase();
+
+      const keywords = senseKeywords
+        .split(",")
+        .map((k) => k.trim())
+        .filter(Boolean);
+
+      const res = await fetch(`${API_BASE}/api/sense-explorer`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          word: senseWord.trim(),
+          pos: sensePos.trim() || "nn",
+          sense: senseDescription.trim(),
+          keywords,
+          topK: 5,
+          maxExamplesPerPeriod: 80,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.details || data?.error || "Sense Explorer request failed.");
+      }
+
+      setSenseResult(data);
+    } catch (error) {
+      console.error("Sense Explorer error:", error);
+      setSenseError(error.message || "Something went wrong.");
+    } finally {
+      setIsExploringSense(false);
+    }
+  };
+
   const ScoreBar = ({ score }) => {
     const s = typeof score === "number" ? score : Number(score);
     const clamped = Number.isFinite(s) ? Math.max(-1, Math.min(1, s)) : 0;
@@ -714,7 +820,7 @@ const SemanticChangeApp = () => {
                 signed_score: {ex.signed_score?.toFixed?.(3) ?? ex.signed_score}
               </p>
               <p style={{ color: "#374151", fontStyle: "italic", lineHeight: 1.6, margin: 0 }}>
-                "{ex.sentence}"
+                "{cleanDisplaySentence(ex.sentence)}"
               </p>
             </div>
           ))}
@@ -723,6 +829,751 @@ const SemanticChangeApp = () => {
         <p style={{ color: "#6b7280", fontStyle: "italic" }}>No axis examples.</p>
       )}
     </div>
+  );
+
+  const renderAboutPage = () => (
+    <div style={styles.aboutBox}>
+      <h2 style={styles.aboutTitle}>What is ChronoWords?</h2>
+
+      <p style={{ color: "#374151", lineHeight: 1.7, fontSize: "16px" }}>
+        ChronoWords is a semantic change explorer. It compares how a word is used in two time
+        periods and surfaces interpretable signals of meaning shift.
+      </p>
+
+      <div style={styles.aboutCard}>
+        <h3 style={{ color: "#4338ca", marginTop: 0 }}>What you see on the main page</h3>
+
+        <p>
+          <b>Change Score</b> — a normalized indicator of how much the word’s meaning changed
+          between periods.
+        </p>
+        <p>
+          <b>Word Usage Over Time</b> — how many examples were analyzed in each period.
+        </p>
+        <p>
+          <b>Usage Examples (Clusters)</b> — sentences grouped by similar usage.
+        </p>
+        <p>
+          <b>Axis-based Explanation</b> — interpretable dimensions that separate contexts.
+        </p>
+        <p>
+          <b>Words with Similar Change</b> — other words that drifted in a similar way.
+        </p>
+        <p>
+          <b>Sense Explorer</b> — an experimental page where the user can introduce a proposed
+          meaning and search for matching examples in the corpus.
+        </p>
+      </div>
+    </div>
+  );
+
+  const renderSenseExplorerPage = () => (
+    <div style={styles.aboutBox}>
+      <h2 style={styles.aboutTitle}>Sense Explorer</h2>
+
+      <p style={{ color: "#374151", lineHeight: 1.7, fontSize: "16px" }}>
+        This experimental page lets the user test a proposed meaning for a word already included
+        in the application. The system compares the proposed sense with the stored corpus examples
+        and retrieves the closest examples from both time periods.
+      </p>
+
+      <div style={styles.aboutCard}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: "16px",
+          }}
+        >
+          <div>
+            <label
+              style={{
+                display: "block",
+                fontWeight: 800,
+                color: "#374151",
+                marginBottom: 8,
+              }}
+            >
+              Word
+            </label>
+            <input
+              value={senseWord}
+              onChange={(e) => setSenseWord(e.target.value)}
+              placeholder="power"
+              style={styles.input}
+            />
+          </div>
+
+          <div>
+            <label
+              style={{
+                display: "block",
+                fontWeight: 800,
+                color: "#374151",
+                marginBottom: 8,
+              }}
+            >
+              Part of speech
+            </label>
+            <input
+              value={sensePos}
+              onChange={(e) => setSensePos(e.target.value)}
+              placeholder="nn"
+              style={styles.input}
+            />
+          </div>
+        </div>
+
+        <div style={{ marginTop: "18px" }}>
+          <label
+            style={{
+              display: "block",
+              fontWeight: 800,
+              color: "#374151",
+              marginBottom: 8,
+            }}
+          >
+            Proposed sense
+          </label>
+          <textarea
+            value={senseDescription}
+            onChange={(e) => setSenseDescription(e.target.value)}
+            placeholder="Describe the meaning you want to search for..."
+            rows={4}
+            style={{
+              ...styles.input,
+              height: "auto",
+              paddingTop: "14px",
+              paddingBottom: "14px",
+              resize: "vertical",
+              fontFamily:
+                '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+            }}
+          />
+        </div>
+
+        <div style={{ marginTop: "18px" }}>
+          <label
+            style={{
+              display: "block",
+              fontWeight: 800,
+              color: "#374151",
+              marginBottom: 8,
+            }}
+          >
+            Optional keywords
+          </label>
+          <input
+            value={senseKeywords}
+            onChange={(e) => setSenseKeywords(e.target.value)}
+            placeholder="energy, electricity, wind, solar"
+            style={styles.input}
+          />
+          <p style={{ margin: "8px 0 0", color: "#6b7280", fontSize: "13px" }}>
+            Separate keywords with commas.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          disabled={isExploringSense}
+          onClick={exploreSense}
+          style={{
+            ...styles.primaryButton,
+            marginTop: "22px",
+            opacity: isExploringSense ? 0.75 : 1,
+            cursor: isExploringSense ? "not-allowed" : "pointer",
+          }}
+        >
+          {isExploringSense ? (
+            <>
+              <span style={styles.spinner} />
+              Exploring...
+            </>
+          ) : (
+            "Explore sense"
+          )}
+        </button>
+
+        {senseError && (
+          <p style={{ color: "#dc2626", fontWeight: 700, marginTop: "18px" }}>{senseError}</p>
+        )}
+      </div>
+
+      {senseResult && (
+        <div style={styles.section}>
+          <h3 style={styles.sectionTitle}>
+            <FontAwesomeIcon icon={faBrain} />
+            Sense Exploration Result
+          </h3>
+
+          <div style={styles.smallCard}>
+            <p style={{ marginTop: 0, color: "#374151", lineHeight: 1.7 }}>
+              <b>Word:</b> {senseResult.word} ({senseResult.pos})
+            </p>
+
+            <p style={{ color: "#374151", lineHeight: 1.7 }}>
+              <b>Proposed sense:</b> {senseResult.proposed_sense}
+            </p>
+
+            <p style={{ color: "#4338ca", fontWeight: 900, fontSize: "18px" }}>
+              {buildSenseVerdict(senseResult)}
+            </p>
+
+            <p style={{ color: "#6b7280", lineHeight: 1.6, marginBottom: 0 }}>
+              {senseResult.interpretation}
+            </p>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+              gap: "18px",
+            }}
+          >
+            {["t1", "t2"].map((periodKey) => {
+              const label =
+                periodKey === "t1"
+                  ? senseResult.period_labels?.t1 || "T1"
+                  : senseResult.period_labels?.t2 || "T2";
+
+              const examples = senseResult.matches?.[periodKey] || [];
+              const bestScore = getBestScore(examples);
+
+              return (
+                <div key={periodKey} style={styles.smallCard}>
+                  <h4 style={{ color: "#4338ca", marginTop: 0 }}>
+                    <FontAwesomeIcon icon={faClockRotateLeft} /> {label}
+                  </h4>
+
+                  <p style={{ color: "#374151", fontWeight: 800 }}>
+                    Best similarity: {bestScore ? bestScore.toFixed(3) : "N/A"}{" "}
+                    <span style={{ color: "#6b7280", fontWeight: 600 }}>
+                      ({getMatchStrength(bestScore)})
+                    </span>
+                  </p>
+
+                  {examples.length > 0 ? (
+                    examples.map((ex, idx) => (
+                      <div key={ex.text_id || idx} style={styles.exampleCard}>
+                        <p style={{ fontSize: "12px", color: "#6b7280", margin: "0 0 6px" }}>
+                          similarity: {Number(ex.similarity).toFixed(3)}
+                        </p>
+                        <p
+                          style={{
+                            color: "#374151",
+                            fontStyle: "italic",
+                            lineHeight: 1.6,
+                            margin: 0,
+                          }}
+                        >
+                          "{cleanDisplaySentence(ex.sentence)}"
+                        </p>
+                      </div>
+                    ))
+                  ) : (
+                    <p style={{ color: "#6b7280", fontStyle: "italic" }}>
+                      No matching examples found for this period.
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <p style={{ marginTop: "18px", color: "#6b7280", fontSize: "13px" }}>
+            {senseResult.note}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderHomePage = () => (
+    <>
+      <div style={styles.searchOuter}>
+        <div style={styles.searchRow}>
+          <div ref={inputWrapRef} style={styles.inputWrap}>
+            <input
+              type="text"
+              placeholder="Enter a word..."
+              value={word}
+              disabled={isSearching}
+              onChange={(e) => {
+                suppressSuggestRef.current = false;
+                setSearchWordForCurrentInput(null);
+                setWord(e.target.value);
+                setShowSuggestions(true);
+              }}
+              onKeyDown={handleInputKeyDown}
+              onBlur={() => {
+                setTimeout(() => setShowSuggestions(false), 120);
+              }}
+              onFocus={() => {
+                if (suggestions.length) setShowSuggestions(true);
+              }}
+              style={{
+                ...styles.input,
+                opacity: isSearching ? 0.75 : 1,
+                background: isSearching ? "#f9fafb" : "white",
+              }}
+            />
+          </div>
+
+          <button
+            type="button"
+            disabled={isSearching || !word.trim()}
+            onClick={() => {
+              fetchSemanticChange(searchWordForCurrentInput ?? word, word);
+            }}
+            style={{
+              ...styles.primaryButton,
+              opacity: isSearching || !word.trim() ? 0.7 : 1,
+              cursor: isSearching || !word.trim() ? "not-allowed" : "pointer",
+            }}
+          >
+            {isSearching ? (
+              <>
+                <span style={styles.spinner} />
+                Loading...
+              </>
+            ) : (
+              "Check"
+            )}
+          </button>
+        </div>
+      </div>
+
+      {showSuggestions && suggestions.length > 0 && dropdownStyle && !isSearching && (
+        <div style={dropdownStyle}>
+          {suggestions.map((s, idx) => {
+            const active = idx === activeSuggestionIdx;
+            const displayWord = stripPosSuffix(s.word, s.pos);
+
+            return (
+              <button
+                key={`${s.word}-${s.pos}-${idx}`}
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handlePickSuggestion(s)}
+                style={{
+                  display: "flex",
+                  width: "100%",
+                  justifyContent: "space-between",
+                  padding: "12px 16px",
+                  border: "none",
+                  borderBottom: "1px solid #eef2ff",
+                  background: active ? "#eef2ff" : "white",
+                  cursor: "pointer",
+                  textAlign: "left",
+                  fontSize: "15px",
+                }}
+              >
+                <span style={{ fontWeight: 800 }}>{displayWord}</span>
+                <span style={{ fontSize: 13, color: "#6b7280" }}>{s.pos}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {wordForms.length > 0 && (
+        <div style={{ marginTop: "24px" }}>
+          <label
+            style={{
+              display: "block",
+              color: "#374151",
+              fontWeight: 800,
+              fontSize: "17px",
+              marginBottom: "10px",
+            }}
+          >
+            Part of Speech
+          </label>
+
+          <select
+            onChange={(e) =>
+              setSelectedForm(wordForms.find((f) => f.part_of_speech === e.target.value))
+            }
+            value={selectedForm?.part_of_speech || ""}
+            disabled={wordForms.length === 1 || isSearching}
+            style={{
+              width: "260px",
+              maxWidth: "100%",
+              height: "46px",
+              border: "1px solid #c7d2fe",
+              borderRadius: "14px",
+              padding: "0 14px",
+              fontSize: "16px",
+              fontWeight: 700,
+              color: "#374151",
+              background: "white",
+              boxShadow: "0 8px 20px rgba(15, 23, 42, 0.08)",
+              opacity: wordForms.length === 1 || isSearching ? 0.7 : 1,
+            }}
+          >
+            {wordForms.map((form, index) => (
+              <option key={index} value={form.part_of_speech}>
+                {form.part_of_speech}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {selectedForm && (
+        <div style={styles.resultCard}>
+          <p
+            style={{
+              margin: "0 0 4px",
+              fontSize: "20px",
+              fontWeight: 800,
+              color: "#374151",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: "8px",
+              flexWrap: "wrap",
+            }}
+          >
+            <FontAwesomeIcon icon={faBrain} style={{ color: "#4f46e5" }} />
+            Change Score:
+            <span style={{ color: "#4f46e5" }}>
+              {Number.isFinite(Number(selectedForm.semantic_change?.normalized_score))
+                ? Number(selectedForm.semantic_change.normalized_score).toFixed(2)
+                : "N/A"}{" "}
+              – {selectedForm.semantic_change?.change_category ?? "Unknown"}
+            </span>
+          </p>
+
+          <div style={styles.section}>
+            <h3 style={styles.sectionTitle}>
+              <FontAwesomeIcon icon={faChartSimple} />
+              Word Usage Over Time
+            </h3>
+
+            <div style={{ width: "100%", height: "300px" }}>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={selectedForm.history}>
+                  <XAxis dataKey="period" tick={{ fill: "#6b46c1", fontSize: 14 }} />
+                  <YAxis tick={{ fill: "#6b46c1", fontSize: 14 }} />
+
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (!active || !payload || payload.length === 0) return null;
+
+                      return (
+                        <div
+                          style={{
+                            background: "white",
+                            border: "1px solid #e5e7eb",
+                            borderRadius: "10px",
+                            padding: "10px 14px",
+                            boxShadow: "0 10px 25px rgba(15, 23, 42, 0.12)",
+                            color: "#4338ca",
+                            fontWeight: 700,
+                          }}
+                        >
+                          usage: {payload[0]?.value}
+                        </div>
+                      );
+                    }}
+                  />
+
+                  <Bar
+                    dataKey="usage"
+                    fill="rgb(79, 70, 229)"
+                    radius={[10, 10, 0, 0]}
+                    barSize={40}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div style={styles.section}>
+            <h3 style={styles.sectionTitle}>
+              <FontAwesomeIcon icon={faBookOpen} />
+              Usage Examples (Clusters)
+            </h3>
+
+            {["t1", "t2"].map((periodKey) => {
+              const clusters = selectedForm.clusters?.[periodKey];
+              const explanation =
+                periodKey === "t1" ? selectedForm.conclusion_t1 : selectedForm.conclusion_t2;
+              const label =
+                periodKey === "t1"
+                  ? selectedForm.period_labels?.t1 || "T1"
+                  : selectedForm.period_labels?.t2 || "T2";
+
+              return (
+                <div key={periodKey} style={styles.smallCard}>
+                  <h4
+                    style={{
+                      color: "#4338ca",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      marginTop: 0,
+                    }}
+                  >
+                    <FontAwesomeIcon icon={faClockRotateLeft} />
+                    Period: {label}
+                  </h4>
+
+                  <p style={{ color: "#db2777", fontStyle: "italic" }}>
+                    <FontAwesomeIcon icon={faCommentDots} /> Explanation:{" "}
+                    {explanation || "No conclusion"}
+                  </p>
+
+                  {clusters &&
+                    Object.entries(clusters).map(([clusterIdx, sentences]) => {
+                      const safeSentences = Array.isArray(sentences) ? sentences : [];
+
+                      return (
+                        <div
+                          key={clusterIdx}
+                          style={{
+                            background: "white",
+                            border: "1px solid #e5e7eb",
+                            borderRadius: "16px",
+                            padding: "16px",
+                            marginTop: "16px",
+                          }}
+                        >
+                          <h5 style={{ color: "#4f46e5", marginTop: 0 }}>
+                            <FontAwesomeIcon icon={faLayerGroup} /> Cluster {clusterIdx}
+                          </h5>
+
+                          {safeSentences.length > 0 ? (
+                            safeSentences.slice(0, 1).map((sentence, i) => (
+                              <div key={i} style={styles.exampleCard}>
+                                <p
+                                  style={{
+                                    color: "#374151",
+                                    fontStyle: "italic",
+                                    lineHeight: 1.6,
+                                    margin: 0,
+                                  }}
+                                >
+                                  "
+                                  {typeof sentence === "string"
+                                    ? cleanDisplaySentence(sentence)
+                                    : JSON.stringify(sentence)}
+                                  "
+                                </p>
+                              </div>
+                            ))
+                          ) : (
+                            <p style={{ color: "#6b7280", fontStyle: "italic" }}>
+                              No examples for this cluster.
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={styles.section}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: "12px",
+                alignItems: "center",
+                flexWrap: "wrap",
+                marginBottom: "18px",
+              }}
+            >
+              <h3 style={{ ...styles.sectionTitle, marginBottom: 0 }}>
+                <FontAwesomeIcon icon={faBrain} />
+                Axis-based Explanation
+              </h3>
+
+              {totalAxesCount > 3 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllAxes((v) => !v)}
+                  style={{
+                    ...styles.navButton,
+                    color: "#4338ca",
+                    borderColor: "#c7d2fe",
+                  }}
+                >
+                  <FontAwesomeIcon
+                    icon={showAllAxes ? faChevronUp : faChevronDown}
+                    style={{ marginRight: "8px" }}
+                  />
+                  {showAllAxes ? "Show top 3" : `Show all (${totalAxesCount})`}
+                </button>
+              )}
+            </div>
+
+            {selectedForm.axes_explanation?.length > 0 ? (
+              <div>
+                {selectedAxes.map((ax, idx) => {
+                  const axisId = ax.axis_id;
+                  const isOpen = expandedAxisIds.has(axisId);
+                  const examplesForAxis = selectedForm.axis_examples?.[axisId] || {
+                    t1: [],
+                    t2: [],
+                  };
+
+                  return (
+                    <div key={axisId} style={styles.smallCard}>
+                      <button
+                        type="button"
+                        onClick={() => toggleAxisExpanded(axisId)}
+                        style={{
+                          width: "100%",
+                          border: "none",
+                          background: "transparent",
+                          padding: 0,
+                          textAlign: "left",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: "12px",
+                            alignItems: "flex-start",
+                          }}
+                        >
+                          <div>
+                            <p
+                              style={{
+                                margin: "0 0 6px",
+                                color: "#4338ca",
+                                fontWeight: 800,
+                              }}
+                            >
+                              #{idx + 1} • Axis {axisId}
+                            </p>
+                            <p
+                              style={{
+                                margin: 0,
+                                color: "#111827",
+                                fontWeight: 900,
+                                lineHeight: 1.4,
+                              }}
+                            >
+                              {axisShortLabel(ax)}
+                            </p>
+                          </div>
+
+                          <span style={{ color: "#4338ca", fontWeight: 800 }}>
+                            <FontAwesomeIcon
+                              icon={isOpen ? faChevronUp : faChevronDown}
+                              style={{ marginRight: "8px" }}
+                            />
+                            {isOpen ? "Hide" : "Examples"}
+                          </span>
+                        </div>
+
+                        <div style={{ marginTop: "14px" }}>
+                          <ScoreBar score={ax.signed_projection} />
+                        </div>
+                      </button>
+
+                      {isOpen && (
+                        <div style={{ marginTop: "18px" }}>
+                          <div
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                              gap: "16px",
+                              marginBottom: "16px",
+                            }}
+                          >
+                            <PillList title="Positive side keywords" items={ax.top_pos_words || []} />
+                            <PillList title="Negative side keywords" items={ax.top_neg_words || []} />
+                          </div>
+
+                          <div
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                              gap: "16px",
+                            }}
+                          >
+                            <ExampleList
+                              label={`Examples (${selectedForm.period_labels?.t1 || "T1"})`}
+                              examples={examplesForAxis.t1 || []}
+                            />
+                            <ExampleList
+                              label={`Examples (${selectedForm.period_labels?.t2 || "T2"})`}
+                              examples={examplesForAxis.t2 || []}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p style={{ color: "#6b7280", fontStyle: "italic" }}>
+                No axis explanation available.
+              </p>
+            )}
+          </div>
+
+          <div style={styles.section}>
+            <h3 style={styles.sectionTitle}>
+              <FontAwesomeIcon icon={faLayerGroup} />
+              Words with Similar Change
+            </h3>
+
+            {selectedForm.similar_drift_words?.length > 0 ? (
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "12px",
+                  justifyContent: "center",
+                }}
+              >
+                {selectedForm.similar_drift_words.map((w, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    disabled={isSearching}
+                    onClick={() => handleSimilarWordClick(w)}
+                    style={{
+                      ...styles.chipButton,
+                      opacity: isSearching ? 0.7 : 1,
+                      cursor: isSearching ? "not-allowed" : "pointer",
+                    }}
+                    title="Click to search"
+                  >
+                    <p style={{ margin: "0 0 6px", color: "#4338ca", fontWeight: 900 }}>
+                      {stripPosSuffix(w.word, w.pos)}{" "}
+                      <span style={{ color: "#6b7280" }}>({w.pos})</span>
+                    </p>
+                    <p style={{ margin: "0 0 4px", color: "#4b5563", fontSize: "13px" }}>
+                      sim: {w.similarity?.toFixed?.(3) ?? w.similarity}
+                    </p>
+                    <p style={{ margin: 0, color: "#6b7280", fontSize: "12px" }}>
+                      {w.method ? `method: ${w.method}` : ""}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p style={{ color: "#6b7280", fontStyle: "italic" }}>
+                No similar-change suggestions available.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   );
 
   return (
@@ -754,6 +1605,15 @@ const SemanticChangeApp = () => {
 
           <button
             type="button"
+            onClick={() => setActivePage("sense")}
+            style={activePage === "sense" ? styles.navButtonActive : styles.navButton}
+          >
+            <FontAwesomeIcon icon={faBrain} style={{ marginRight: "8px" }} />
+            Sense Explorer
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActivePage("about")}
             style={activePage === "about" ? styles.navButtonActive : styles.navButton}
           >
@@ -762,527 +1622,9 @@ const SemanticChangeApp = () => {
           </button>
         </div>
 
-        {activePage === "about" ? (
-          <div style={styles.aboutBox}>
-            <h2 style={styles.aboutTitle}>What is ChronoWords?</h2>
-
-            <p style={{ color: "#374151", lineHeight: 1.7, fontSize: "16px" }}>
-              ChronoWords is a semantic change explorer. It compares how a word is used in two time periods and surfaces interpretable
-                  signals of meaning shift.
-            </p>
-
-            <div style={styles.aboutCard}>
-              <h3 style={{ color: "#4338ca", marginTop: 0 }}>What you see on the main page</h3>
-
-              <p>
-                <b>Change Score</b> — a normalized indicator of how much the word’s meaning changed
-                between periods.
-              </p>
-              <p>
-                <b>Word Usage Over Time</b> — how many examples were analyzed in each period.
-              </p>
-              <p>
-                <b>Usage Examples (Clusters)</b> — sentences grouped by similar usage.
-              </p>
-              <p>
-                <b>Axis-based Explanation</b> — interpretable dimensions that separate contexts.
-              </p>
-              <p>
-                <b>Words with Similar Change</b> — other words that drifted in a similar way.
-              </p>
-            </div>
-          </div>
-        ) : (
-          <>
-            <div style={styles.searchOuter}>
-              <div style={styles.searchRow}>
-                <div ref={inputWrapRef} style={styles.inputWrap}>
-                  <input
-                    type="text"
-                    placeholder="Enter a word..."
-                    value={word}
-                    disabled={isSearching}
-                    onChange={(e) => {
-                      suppressSuggestRef.current = false;
-                      setSearchWordForCurrentInput(null);
-                      setWord(e.target.value);
-                      setShowSuggestions(true);
-                    }}
-                    onKeyDown={handleInputKeyDown}
-                    onBlur={() => {
-                      setTimeout(() => setShowSuggestions(false), 120);
-                    }}
-                    onFocus={() => {
-                      if (suggestions.length) setShowSuggestions(true);
-                    }}
-                    style={{
-                      ...styles.input,
-                      opacity: isSearching ? 0.75 : 1,
-                      background: isSearching ? "#f9fafb" : "white",
-                    }}
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  disabled={isSearching || !word.trim()}
-                  onClick={() => {
-                    fetchSemanticChange(searchWordForCurrentInput ?? word, word);
-                  }}
-                  style={{
-                    ...styles.primaryButton,
-                    opacity: isSearching || !word.trim() ? 0.7 : 1,
-                    cursor: isSearching || !word.trim() ? "not-allowed" : "pointer",
-                  }}
-                >
-                  {isSearching ? (
-                    <>
-                      <span style={styles.spinner} />
-                      Loading...
-                    </>
-                  ) : (
-                    "Check"
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {showSuggestions && suggestions.length > 0 && dropdownStyle && !isSearching && (
-              <div style={dropdownStyle}>
-                {suggestions.map((s, idx) => {
-                  const active = idx === activeSuggestionIdx;
-                  const displayWord = stripPosSuffix(s.word, s.pos);
-
-                  return (
-                    <button
-                      key={`${s.word}-${s.pos}-${idx}`}
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => handlePickSuggestion(s)}
-                      style={{
-                        display: "flex",
-                        width: "100%",
-                        justifyContent: "space-between",
-                        padding: "12px 16px",
-                        border: "none",
-                        borderBottom: "1px solid #eef2ff",
-                        background: active ? "#eef2ff" : "white",
-                        cursor: "pointer",
-                        textAlign: "left",
-                        fontSize: "15px",
-                      }}
-                    >
-                      <span style={{ fontWeight: 800 }}>{displayWord}</span>
-                      <span style={{ fontSize: 13, color: "#6b7280" }}>{s.pos}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {wordForms.length > 0 && (
-              <div style={{ marginTop: "24px" }}>
-                <label
-                  style={{
-                    display: "block",
-                    color: "#374151",
-                    fontWeight: 800,
-                    fontSize: "17px",
-                    marginBottom: "10px",
-                  }}
-                >
-                  Part of Speech
-                </label>
-
-                <select
-                  onChange={(e) =>
-                    setSelectedForm(wordForms.find((f) => f.part_of_speech === e.target.value))
-                  }
-                  value={selectedForm?.part_of_speech || ""}
-                  disabled={wordForms.length === 1 || isSearching}
-                  style={{
-                    width: "260px",
-                    maxWidth: "100%",
-                    height: "46px",
-                    border: "1px solid #c7d2fe",
-                    borderRadius: "14px",
-                    padding: "0 14px",
-                    fontSize: "16px",
-                    fontWeight: 700,
-                    color: "#374151",
-                    background: "white",
-                    boxShadow: "0 8px 20px rgba(15, 23, 42, 0.08)",
-                    opacity: wordForms.length === 1 || isSearching ? 0.7 : 1,
-                  }}
-                >
-                  {wordForms.map((form, index) => (
-                    <option key={index} value={form.part_of_speech}>
-                      {form.part_of_speech}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {selectedForm && (
-              <div style={styles.resultCard}>
-                <p
-                  style={{
-                    margin: "0 0 4px",
-                    fontSize: "20px",
-                    fontWeight: 800,
-                    color: "#374151",
-                    display: "flex",
-                    justifyContent: "center",
-                    alignItems: "center",
-                    gap: "8px",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <FontAwesomeIcon icon={faBrain} style={{ color: "#4f46e5" }} />
-                  Change Score:
-                  <span style={{ color: "#4f46e5" }}>
-                    {Number.isFinite(Number(selectedForm.semantic_change?.normalized_score))
-                      ? Number(selectedForm.semantic_change.normalized_score).toFixed(2)
-                      : "N/A"}{" "}
-                    – {selectedForm.semantic_change?.change_category ?? "Unknown"}
-                  </span>
-                </p>
-
-                <div style={styles.section}>
-                  <h3 style={styles.sectionTitle}>
-                    <FontAwesomeIcon icon={faChartSimple} />
-                    Word Usage Over Time
-                  </h3>
-
-                  <div style={{ width: "100%", height: "300px" }}>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={selectedForm.history}>
-                        <XAxis dataKey="period" tick={{ fill: "#6b46c1", fontSize: 14 }} />
-                        <YAxis tick={{ fill: "#6b46c1", fontSize: 14 }} />
-
-                        <Tooltip
-                          content={({ active, payload }) => {
-                            if (!active || !payload || payload.length === 0) return null;
-
-                            return (
-                              <div
-                                style={{
-                                  background: "white",
-                                  border: "1px solid #e5e7eb",
-                                  borderRadius: "10px",
-                                  padding: "10px 14px",
-                                  boxShadow: "0 10px 25px rgba(15, 23, 42, 0.12)",
-                                  color: "#4338ca",
-                                  fontWeight: 700,
-                                }}
-                              >
-                                usage: {payload[0]?.value}
-                              </div>
-                            );
-                          }}
-                        />
-
-                        <Bar
-                          dataKey="usage"
-                          fill="rgb(79, 70, 229)"
-                          radius={[10, 10, 0, 0]}
-                          barSize={40}
-                        />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                <div style={styles.section}>
-                  <h3 style={styles.sectionTitle}>
-                    <FontAwesomeIcon icon={faBookOpen} />
-                    Usage Examples (Clusters)
-                  </h3>
-
-                  {["t1", "t2"].map((periodKey) => {
-                    const clusters = selectedForm.clusters?.[periodKey];
-                    const explanation =
-                      periodKey === "t1" ? selectedForm.conclusion_t1 : selectedForm.conclusion_t2;
-                    const label =
-                      periodKey === "t1"
-                        ? selectedForm.period_labels?.t1 || "T1"
-                        : selectedForm.period_labels?.t2 || "T2";
-
-                    return (
-                      <div key={periodKey} style={styles.smallCard}>
-                        <h4
-                          style={{
-                            color: "#4338ca",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            marginTop: 0,
-                          }}
-                        >
-                          <FontAwesomeIcon icon={faClockRotateLeft} />
-                          Period: {label}
-                        </h4>
-
-                        <p style={{ color: "#db2777", fontStyle: "italic" }}>
-                          <FontAwesomeIcon icon={faCommentDots} /> Explanation:{" "}
-                          {explanation || "No conclusion"}
-                        </p>
-
-                        {clusters &&
-                          Object.entries(clusters).map(([clusterIdx, sentences]) => {
-                            const safeSentences = Array.isArray(sentences) ? sentences : [];
-
-                            return (
-                              <div
-                                key={clusterIdx}
-                                style={{
-                                  background: "white",
-                                  border: "1px solid #e5e7eb",
-                                  borderRadius: "16px",
-                                  padding: "16px",
-                                  marginTop: "16px",
-                                }}
-                              >
-                                <h5 style={{ color: "#4f46e5", marginTop: 0 }}>
-                                  <FontAwesomeIcon icon={faLayerGroup} /> Cluster {clusterIdx}
-                                </h5>
-
-                                {safeSentences.length > 0 ? (
-                                  safeSentences.slice(0, 1).map((sentence, i) => (
-                                    <div key={i} style={styles.exampleCard}>
-                                      <p
-                                        style={{
-                                          color: "#374151",
-                                          fontStyle: "italic",
-                                          lineHeight: 1.6,
-                                          margin: 0,
-                                        }}
-                                      >
-                                        "
-                                        {typeof sentence === "string"
-                                          ? sentence
-                                          : JSON.stringify(sentence)}
-                                        "
-                                      </p>
-                                    </div>
-                                  ))
-                                ) : (
-                                  <p style={{ color: "#6b7280", fontStyle: "italic" }}>
-                                    No examples for this cluster.
-                                  </p>
-                                )}
-                              </div>
-                            );
-                          })}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div style={styles.section}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: "12px",
-                      alignItems: "center",
-                      flexWrap: "wrap",
-                      marginBottom: "18px",
-                    }}
-                  >
-                    <h3 style={{ ...styles.sectionTitle, marginBottom: 0 }}>
-                      <FontAwesomeIcon icon={faBrain} />
-                      Axis-based Explanation
-                    </h3>
-
-                    {totalAxesCount > 3 && (
-                      <button
-                        type="button"
-                        onClick={() => setShowAllAxes((v) => !v)}
-                        style={{
-                          ...styles.navButton,
-                          color: "#4338ca",
-                          borderColor: "#c7d2fe",
-                        }}
-                      >
-                        <FontAwesomeIcon
-                          icon={showAllAxes ? faChevronUp : faChevronDown}
-                          style={{ marginRight: "8px" }}
-                        />
-                        {showAllAxes ? "Show top 3" : `Show all (${totalAxesCount})`}
-                      </button>
-                    )}
-                  </div>
-
-                  {selectedForm.axes_explanation?.length > 0 ? (
-                    <div>
-                      {selectedAxes.map((ax, idx) => {
-                        const axisId = ax.axis_id;
-                        const isOpen = expandedAxisIds.has(axisId);
-                        const examplesForAxis = selectedForm.axis_examples?.[axisId] || {
-                          t1: [],
-                          t2: [],
-                        };
-
-                        return (
-                          <div key={axisId} style={styles.smallCard}>
-                            <button
-                              type="button"
-                              onClick={() => toggleAxisExpanded(axisId)}
-                              style={{
-                                width: "100%",
-                                border: "none",
-                                background: "transparent",
-                                padding: 0,
-                                textAlign: "left",
-                                cursor: "pointer",
-                              }}
-                            >
-                              <div
-                                style={{
-                                  display: "flex",
-                                  justifyContent: "space-between",
-                                  gap: "12px",
-                                  alignItems: "flex-start",
-                                }}
-                              >
-                                <div>
-                                  <p
-                                    style={{
-                                      margin: "0 0 6px",
-                                      color: "#4338ca",
-                                      fontWeight: 800,
-                                    }}
-                                  >
-                                    #{idx + 1} • Axis {axisId}
-                                  </p>
-                                  <p
-                                    style={{
-                                      margin: 0,
-                                      color: "#111827",
-                                      fontWeight: 900,
-                                      lineHeight: 1.4,
-                                    }}
-                                  >
-                                    {axisShortLabel(ax)}
-                                  </p>
-                                </div>
-
-                                <span style={{ color: "#4338ca", fontWeight: 800 }}>
-                                  <FontAwesomeIcon
-                                    icon={isOpen ? faChevronUp : faChevronDown}
-                                    style={{ marginRight: "8px" }}
-                                  />
-                                  {isOpen ? "Hide" : "Examples"}
-                                </span>
-                              </div>
-
-                              <div style={{ marginTop: "14px" }}>
-                                <ScoreBar score={ax.signed_projection} />
-                              </div>
-                            </button>
-
-                            {isOpen && (
-                              <div style={{ marginTop: "18px" }}>
-                                <div
-                                  style={{
-                                    display: "grid",
-                                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                                    gap: "16px",
-                                    marginBottom: "16px",
-                                  }}
-                                >
-                                  <PillList
-                                    title="Positive side keywords"
-                                    items={ax.top_pos_words || []}
-                                  />
-                                  <PillList
-                                    title="Negative side keywords"
-                                    items={ax.top_neg_words || []}
-                                  />
-                                </div>
-
-                                <div
-                                  style={{
-                                    display: "grid",
-                                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                                    gap: "16px",
-                                  }}
-                                >
-                                  <ExampleList
-                                    label={`Examples (${selectedForm.period_labels?.t1 || "T1"})`}
-                                    examples={examplesForAxis.t1 || []}
-                                  />
-                                  <ExampleList
-                                    label={`Examples (${selectedForm.period_labels?.t2 || "T2"})`}
-                                    examples={examplesForAxis.t2 || []}
-                                  />
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <p style={{ color: "#6b7280", fontStyle: "italic" }}>
-                      No axis explanation available.
-                    </p>
-                  )}
-                </div>
-
-                <div style={styles.section}>
-                  <h3 style={styles.sectionTitle}>
-                    <FontAwesomeIcon icon={faLayerGroup} />
-                    Words with Similar Change
-                  </h3>
-
-                  {selectedForm.similar_drift_words?.length > 0 ? (
-                    <div
-                      style={{
-                        display: "flex",
-                        flexWrap: "wrap",
-                        gap: "12px",
-                        justifyContent: "center",
-                      }}
-                    >
-                      {selectedForm.similar_drift_words.map((w, idx) => (
-                        <button
-                          key={idx}
-                          type="button"
-                          disabled={isSearching}
-                          onClick={() => handleSimilarWordClick(w)}
-                          style={{
-                            ...styles.chipButton,
-                            opacity: isSearching ? 0.7 : 1,
-                            cursor: isSearching ? "not-allowed" : "pointer",
-                          }}
-                          title="Click to search"
-                        >
-                          <p style={{ margin: "0 0 6px", color: "#4338ca", fontWeight: 900 }}>
-                            {stripPosSuffix(w.word, w.pos)}{" "}
-                            <span style={{ color: "#6b7280" }}>({w.pos})</span>
-                          </p>
-                          <p style={{ margin: "0 0 4px", color: "#4b5563", fontSize: "13px" }}>
-                            sim: {w.similarity?.toFixed?.(3) ?? w.similarity}
-                          </p>
-                          <p style={{ margin: 0, color: "#6b7280", fontSize: "12px" }}>
-                            {w.method ? `method: ${w.method}` : ""}
-                          </p>
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <p style={{ color: "#6b7280", fontStyle: "italic" }}>
-                      No similar-change suggestions available.
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-          </>
-        )}
+        {activePage === "about" && renderAboutPage()}
+        {activePage === "sense" && renderSenseExplorerPage()}
+        {activePage === "home" && renderHomePage()}
       </div>
     </div>
   );

@@ -1,4 +1,9 @@
 require("dotenv").config();
+
+console.log("GEMINI loaded in server:", !!process.env.GEMINI_API_KEY);
+console.log("GEMINI starts with:", process.env.GEMINI_API_KEY?.slice(0, 6));
+console.log("PYTHON_PATH:", process.env.PYTHON_PATH);
+
 const express = require("express");
 const cors = require("cors");
 

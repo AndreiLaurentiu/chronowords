@@ -8,6 +8,7 @@ const express = require("express");
 const cors = require("cors");
 
 const app = express();
+app.set("trust proxy", 1);
 const sequelize = require("./config/db.config");
 const wordRoutes = require("./routes/word.routes");
 const { apiLimiter, heavyLimiter } = require("./rateLimit");

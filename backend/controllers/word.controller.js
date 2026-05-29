@@ -941,8 +941,36 @@ for (const ex of candidateExamples) {
     bestT2: matches.t2?.[0]?.similarity,
   });
 
-    let llmResult;
+  const bestT1 = matches.t1?.[0]?.similarity || 0;
+  const bestT2 = matches.t2?.[0]?.similarity || 0;
+  const bestOverall = Math.max(bestT1, bestT2);
 
+  let supportLevel = "weak";
+
+  if (bestOverall >= 0.6) {
+    supportLevel = "strong";
+  } else if (bestOverall >= 0.35) {
+    supportLevel = "moderate";
+  }
+
+  const hasEnoughEvidence = bestOverall >= 0.6;
+
+console.log("[Sense] Evidence level:", {
+  bestT1,
+  bestT2,
+  bestOverall,
+  supportLevel,
+  hasEnoughEvidence,
+});
+
+  let llmResult;
+
+  if (!hasEnoughEvidence) {
+    llmResult = {
+      interpretation:
+        "The proposed sense is not strongly supported by the available corpus examples. The retrieved examples have low similarity scores, so the system cannot provide reliable evidence that this meaning is present for the selected word.",
+    };
+  } else {
     console.time("sense-gemini");
 
     try {
@@ -959,10 +987,12 @@ for (const ex of candidateExamples) {
 
       llmResult = {
         interpretation:
-          "LLM interpretation could not be generated. The examples below were retrieved using Gemini embedding similarity, but the LLM API call failed.",      };
+          "LLM interpretation could not be generated. The examples below were retrieved using Gemini embedding similarity, but the LLM API call failed.",
+      };
     }
 
     console.timeEnd("sense-gemini");
+  }
 
     console.timeEnd("sense-total");
 
@@ -977,7 +1007,10 @@ for (const ex of candidateExamples) {
         t2: examplesByPeriod.t2.length,
         unknown: examplesByPeriod.unknown.length,
       },
-      total_examples_checked: candidateExamples.length,
+      total_examples_checked: storedEmbeddings.length,
+      best_similarity: Number(bestOverall.toFixed(4)),
+      support_level: supportLevel,
+      has_enough_evidence: hasEnoughEvidence,
       matches,
       interpretation: llmResult.interpretation,
       note:

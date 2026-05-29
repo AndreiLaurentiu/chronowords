@@ -634,6 +634,10 @@ const SemanticChangeApp = () => {
   const buildSenseVerdict = (result) => {
     if (!result?.matches) return "";
 
+    if (result.has_enough_evidence === false) {
+      return "Not enough evidence was found for this proposed sense.";
+    }
+
     const t1Best = getBestScore(result.matches.t1 || []);
     const t2Best = getBestScore(result.matches.t2 || []);
 
@@ -1023,6 +1027,32 @@ const SemanticChangeApp = () => {
             <p style={{ color: "#4338ca", fontWeight: 900, fontSize: "18px" }}>
               {buildSenseVerdict(senseResult)}
             </p>
+
+            <p style={{ color: "#374151", lineHeight: 1.7 }}>
+              <b>Evidence level:</b> {senseResult.support_level || "unknown"}{" "}
+              {typeof senseResult.best_similarity === "number"
+                ? `(best similarity: ${senseResult.best_similarity.toFixed(3)})`
+                : ""}
+            </p>
+
+            {senseResult.has_enough_evidence === false && (
+              <div
+                style={{
+                  color: "#92400e",
+                  background: "#fffbeb",
+                  border: "1px solid #fcd34d",
+                  borderRadius: "12px",
+                  padding: "12px",
+                  marginTop: "12px",
+                  marginBottom: "14px",
+                  fontWeight: 700,
+                  lineHeight: 1.5,
+                }}
+              >
+                The proposed sense may not be strongly supported by the available corpus
+                examples. The closest matches should be interpreted with caution.
+              </div>
+            )}
 
             <p style={{ color: "#6b7280", lineHeight: 1.6, marginBottom: 0 }}>
               {senseResult.interpretation}

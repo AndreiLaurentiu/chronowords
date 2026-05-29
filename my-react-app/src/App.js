@@ -674,7 +674,7 @@ const SemanticChangeApp = () => {
         .map((k) => k.trim())
         .filter(Boolean);
 
-      const res = await fetch(`${API_BASE}/api/sense-explorer`, {
+      const res = await fetch(`${API_BASE}/api/words/sense-explorer`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -685,7 +685,7 @@ const SemanticChangeApp = () => {
           sense: senseDescription.trim(),
           keywords,
           topK: 5,
-          maxExamplesPerPeriod: 80,
+          maxExamplesPerPeriod: 5,
         }),
       });
 

@@ -8,6 +8,7 @@ const Axis = require("./axis.model");
 const WordAxisExplanation = require("./wordAxisExplanation.model");
 const WordAxisExample = require("./wordAxisExample.model");
 const WordSimilarDrift = require("./wordSimilarDrift.model");
+const TextEmbedding = require("./textEmbedding.model");
 
 Word.hasMany(SemanticChange, { as: "semanticChanges", foreignKey: "word_id" });
 SemanticChange.belongsTo(Word, { foreignKey: "word_id" });
@@ -41,13 +42,23 @@ WordSimilarDrift.belongsTo(Word, { as: "word", foreignKey: "word_id" });
 
 WordSimilarDrift.belongsTo(Word, { as: "neighbor", foreignKey: "neighbor_word_id" });
 
+Text.hasMany(TextEmbedding, {
+  foreignKey: "text_id",
+  as: "embeddings",
+});
+
+TextEmbedding.belongsTo(Text, {
+  foreignKey: "text_id",
+  as: "text",
+});
+
 module.exports = {
   Word,
   Text,
   Dataset,
   SemanticChange,
   ClusterAssignment,
-
+  TextEmbedding,
   Axis,
   WordAxisExplanation,
   WordAxisExample,

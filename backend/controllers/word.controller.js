@@ -1,7 +1,5 @@
 const { Op } = require("sequelize");
 
-const path = require("path");
-const { spawn } = require("child_process");
 const { GoogleGenAI } = require("@google/genai");
 
 const gemini = process.env.GEMINI_API_KEY
@@ -22,6 +20,7 @@ const {
   WordAxisExplanation,
   WordAxisExample,
   WordSimilarDrift,
+  TextEmbedding,
 } = require("../models");
 
 exports.getWordDetails = async (req, res) => {
@@ -593,65 +592,6 @@ const getSensePeriodLabel = (dataset, fallback) => {
   return dataset?.time_period || fallback;
 };
 
-const runPythonSenseMatcher = (payload) => {
-  return new Promise((resolve, reject) => {
-    const pythonPath = process.env.PYTHON_PATH || "python";
-    const scriptPath = path.join(__dirname, "..", "scripts", "sense_matcher.py");
-
-    console.log("[Python] Starting matcher:", {
-      pythonPath,
-      scriptPath,
-      examplesCount: payload.examples?.length,
-    });
-
-    const child = spawn(pythonPath, [scriptPath], {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (data) => {
-      stdout += data.toString();
-    });
-
-    child.stderr.on("data", (data) => {
-      stderr += data.toString();
-      console.log("[Python stderr chunk]:", data.toString());
-    });
-
-    child.on("error", (error) => {
-      console.error("[Python] spawn error:", error);
-      reject(error);
-    });
-
-    child.on("close", (code) => {
-      console.log("[Python] closed with code:", code);
-      console.log("[Python] stdout length:", stdout.length);
-      console.log("[Python] stderr length:", stderr.length);
-
-      if (code !== 0) {
-        reject(new Error(`Python matcher failed with code ${code}: ${stderr}`));
-        return;
-      }
-
-      try {
-        const parsed = JSON.parse(stdout);
-        resolve(parsed);
-      } catch (error) {
-        reject(
-          new Error(
-            `Could not parse Python output. Error: ${error.message}. Output: ${stdout}. Stderr: ${stderr}`
-          )
-        );
-      }
-    });
-
-    child.stdin.write(JSON.stringify(payload));
-    child.stdin.end();
-  });
-};
-
 const buildLLMSenseInterpretation = async ({
   word,
   pos,
@@ -666,6 +606,10 @@ const buildLLMSenseInterpretation = async ({
         "LLM interpretation is not available because GEMINI_API_KEY is not configured.",
     };
   }
+
+  const bestT1 = matches.t1?.[0]?.similarity || 0;
+  const bestT2 = matches.t2?.[0]?.similarity || 0;
+  const bestOverall = Math.max(bestT1, bestT2);
 
   const compactMatches = {
     t1: (matches.t1 || []).slice(0, 4).map((m) => ({
@@ -687,29 +631,38 @@ const buildLLMSenseInterpretation = async ({
   };
 
   const prompt = `
-  You are helping interpret a semantic change exploration result.
+    You are helping interpret a semantic change exploration result.
 
-  Target word: ${word}
-  Part of speech: ${pos}
-  User proposed sense: ${sense}
-  Optional keywords: ${(keywords || []).join(", ") || "none"}
+    Target word: ${word}
+    Part of speech: ${pos}
+    User proposed sense: ${sense}
+    Optional keywords: ${(keywords || []).join(", ") || "none"}
 
-  Period 1 label: ${periodLabels.t1}
-  Top matching examples from period 1:
-  ${JSON.stringify(compactMatches.t1, null, 2)}
+    Best similarity in period 1: ${bestT1}
+    Best similarity in period 2: ${bestT2}
+    Best overall similarity: ${bestOverall}
 
-  Period 2 label: ${periodLabels.t2}
-  Top matching examples from period 2:
-  ${JSON.stringify(compactMatches.t2, null, 2)}
+    Period 1 label: ${periodLabels.t1}
+    Top matching examples from period 1:
+    ${JSON.stringify(compactMatches.t1, null, 2)}
 
-  Write a short interpretation in 4-6 sentences.
-  Be careful: do not claim definitive semantic change.
-  Do not say that a sense did not exist historically.
-  Only say whether the proposed sense is supported or not supported by the retrieved examples.
-  Say whether the proposed sense appears more supported in period 1, period 2, both, or neither.
-  Use the examples and similarity scores as evidence.
-  Use simple academic English.
-  `;
+    Period 2 label: ${periodLabels.t2}
+    Top matching examples from period 2:
+    ${JSON.stringify(compactMatches.t2, null, 2)}
+
+    Write a short interpretation in 4-6 sentences.
+
+    Important rules:
+    - Do not claim definitive semantic change.
+    - Do not say that a sense did not exist historically.
+    - Only discuss what is supported or not supported by the retrieved examples.
+    - If all similarity scores are low, say that the proposed sense is not strongly supported by the available examples.
+    - Do not describe a score as weak, moderate, or strong unless it matches these thresholds: below 0.35 = weak, 0.35 to 0.60 = moderate, above 0.60 = strong.
+    - Do not invent a sense if the retrieved examples do not support it.
+    - Say whether the proposed sense appears more supported in period 1, period 2, both periods, or neither.
+    - Use the examples and similarity scores as evidence.
+    - Use simple academic English.
+    `;
 
   const response = await gemini.models.generateContent({
     model: "gemini-2.5-flash",
@@ -719,6 +672,55 @@ const buildLLMSenseInterpretation = async ({
   return {
     interpretation: response.text,
   };
+};
+
+const EMBEDDING_MODEL = "gemini-embedding-001";
+
+const getGeminiEmbedding = async (text) => {
+  if (!gemini) {
+    throw new Error("GEMINI_API_KEY is not configured.");
+  }
+
+  const response = await gemini.models.embedContent({
+    model: EMBEDDING_MODEL,
+    contents: text,
+  });
+
+  const vector =
+    response.embeddings?.[0]?.values ||
+    response.embedding?.values ||
+    response.embeddings?.[0]?.embedding?.values;
+
+  if (!vector || !Array.isArray(vector)) {
+    throw new Error("Could not read embedding vector from Gemini response.");
+  }
+
+  return vector;
+};
+
+const cosineSimilarity = (a, b) => {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+    return 0;
+  }
+
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+
+  for (let i = 0; i < a.length; i++) {
+    const x = Number(a[i]);
+    const y = Number(b[i]);
+
+    dot += x * y;
+    normA += x * x;
+    normB += y * y;
+  }
+
+  if (normA === 0 || normB === 0) {
+    return 0;
+  }
+
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 };
 
 exports.exploreSense = async (req, res) => {
@@ -847,42 +849,97 @@ exports.exploreSense = async (req, res) => {
       unknown: examplesByPeriod.unknown.length,
     });
 
-    const sampledExamples = [
-      ...examplesByPeriod.t1.slice(0, maxExamplesPerPeriod),
-      ...examplesByPeriod.t2.slice(0, maxExamplesPerPeriod),
-      ...examplesByPeriod.unknown.slice(0, maxExamplesPerPeriod),
+    const candidateExamples = [
+      ...examplesByPeriod.t1,
+      ...examplesByPeriod.t2,
+      ...examplesByPeriod.unknown,
     ];
 
-    console.log("[Sense] Sampled examples:", sampledExamples.length);
+    console.log("[Sense] Sampled examples:", candidateExamples.length);
 
     const senseForMatching =
       Array.isArray(keywords) && keywords.length > 0
         ? `${cleanSense}. Related keywords: ${keywords.join(", ")}`
         : cleanSense;
 
-    console.time("sense-python-minilm");
+console.time("sense-gemini-embedding");
 
-    const matcherResult = await runPythonSenseMatcher({
-      sense: senseForMatching,
-      examples: sampledExamples,
-      topK,
-    });
+const senseEmbedding = await getGeminiEmbedding(senseForMatching);
 
-    console.timeEnd("sense-python-minilm");
+console.timeEnd("sense-gemini-embedding");
 
-    const matches = matcherResult.matches || {
-      t1: [],
-      t2: [],
-      unknown: [],
-    };
+const sampledTextIds = candidateExamples.map((ex) => ex.text_id);
 
-    console.log("[Sense] MiniLM result:", {
-      t1: matches.t1?.length || 0,
-      t2: matches.t2?.length || 0,
-      unknown: matches.unknown?.length || 0,
-      bestT1: matches.t1?.[0]?.similarity,
-      bestT2: matches.t2?.[0]?.similarity,
-    });
+console.time("sense-db-embeddings");
+
+const storedEmbeddings = await TextEmbedding.findAll({
+  where: {
+    text_id: sampledTextIds,
+    model_name: EMBEDDING_MODEL,
+  },
+});
+
+console.timeEnd("sense-db-embeddings");
+
+console.log("[Sense] Stored embeddings found:", storedEmbeddings.length);
+
+if (storedEmbeddings.length === 0) {
+  console.timeEnd("sense-total");
+
+  return res.status(404).json({
+    error:
+      "No stored embeddings found for this word. Please generate embeddings for this word first.",
+  });
+}
+
+const embeddingByTextId = new Map();
+
+for (const row of storedEmbeddings) {
+  embeddingByTextId.set(Number(row.text_id), row.embedding);
+}
+
+const groupedMatches = {
+  t1: [],
+  t2: [],
+  unknown: [],
+};
+
+for (const ex of candidateExamples) {
+  const textEmbedding = embeddingByTextId.get(Number(ex.text_id));
+
+  if (!textEmbedding) {
+    continue;
+  }
+
+  const similarity = cosineSimilarity(senseEmbedding, textEmbedding);
+
+  const periodKey = ex.period || "unknown";
+
+  if (!groupedMatches[periodKey]) {
+    groupedMatches[periodKey] = [];
+  }
+
+  groupedMatches[periodKey].push({
+    ...ex,
+    similarity: Number(similarity.toFixed(4)),
+  });
+}
+
+  for (const key of Object.keys(groupedMatches)) {
+    groupedMatches[key] = groupedMatches[key]
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, Number(topK) || 5);
+  }
+
+  const matches = groupedMatches;
+
+  console.log("[Sense] Gemini embedding matches:", {
+    t1: matches.t1?.length || 0,
+    t2: matches.t2?.length || 0,
+    unknown: matches.unknown?.length || 0,
+    bestT1: matches.t1?.[0]?.similarity,
+    bestT2: matches.t2?.[0]?.similarity,
+  });
 
     let llmResult;
 
@@ -902,8 +959,7 @@ exports.exploreSense = async (req, res) => {
 
       llmResult = {
         interpretation:
-          "LLM interpretation could not be generated. The examples below were retrieved using MiniLM semantic similarity, but the LLM API call failed.",
-      };
+          "LLM interpretation could not be generated. The examples below were retrieved using Gemini embedding similarity, but the LLM API call failed.",      };
     }
 
     console.timeEnd("sense-gemini");
@@ -921,11 +977,11 @@ exports.exploreSense = async (req, res) => {
         t2: examplesByPeriod.t2.length,
         unknown: examplesByPeriod.unknown.length,
       },
-      total_examples_checked: sampledExamples.length,
+      total_examples_checked: candidateExamples.length,
       matches,
       interpretation: llmResult.interpretation,
       note:
-        "This is a POC. It uses MiniLM semantic similarity for retrieving examples and an LLM for a short interpretation.",
+        "This is a POC. It uses precomputed Gemini embeddings for retrieving examples and a Gemini language model for a short interpretation.",
     });
   } catch (error) {
     console.error("❌ Error in exploreSense:", error);

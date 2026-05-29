@@ -1,0 +1,7 @@
+"C:\Program Files\PostgreSQL\17\bin\psql.exe" "postgresql://chronowords_db_rnkr_user:Mz7QUjlA2MDfh3op3ecWe4Qjr3AdMnjU@dpg-d7rn62v7f7vs73d453kg-a.oregon-postgres.render.com/chronowords_db_rnkr" -f dump.sql   
+
+"C:\Program Files\PostgreSQL\17\bin\psql.exe" `                                                                        
+  "postgresql://chronowords_db_rnkr_user:Mz7QUjlA2MDfh3op3ecWe4Qjr3AdMnjU@dpg-d7rn62v7f7vs73d453kg-a.oregon-postgres.render.com/chronowords_db_rnkr?sslmode=require" `
+   -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+
+"C:\Program Files\PostgreSQL\17\bin\pg_dump.exe" "postgresql://postgres:A7dc2356*@localhost:5432/ChronoWords?sslmode=disable" -f "C:\Users\andre\PycharmProjects\circe_good\dump.sql" 

@@ -598,6 +598,12 @@ const runPythonSenseMatcher = (payload) => {
     const pythonPath = process.env.PYTHON_PATH || "python";
     const scriptPath = path.join(__dirname, "..", "scripts", "sense_matcher.py");
 
+    console.log("[Python] Starting matcher:", {
+      pythonPath,
+      scriptPath,
+      examplesCount: payload.examples?.length,
+    });
+
     const child = spawn(pythonPath, [scriptPath], {
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -611,13 +617,19 @@ const runPythonSenseMatcher = (payload) => {
 
     child.stderr.on("data", (data) => {
       stderr += data.toString();
+      console.log("[Python stderr chunk]:", data.toString());
     });
 
     child.on("error", (error) => {
+      console.error("[Python] spawn error:", error);
       reject(error);
     });
 
     child.on("close", (code) => {
+      console.log("[Python] closed with code:", code);
+      console.log("[Python] stdout length:", stdout.length);
+      console.log("[Python] stderr length:", stderr.length);
+
       if (code !== 0) {
         reject(new Error(`Python matcher failed with code ${code}: ${stderr}`));
         return;
@@ -710,6 +722,9 @@ const buildLLMSenseInterpretation = async ({
 };
 
 exports.exploreSense = async (req, res) => {
+  console.log("🔥 HIT exploreSense:", req.method, req.originalUrl);
+  console.time("sense-total");
+
   try {
     const {
       word,
@@ -720,7 +735,17 @@ exports.exploreSense = async (req, res) => {
       maxExamplesPerPeriod = 80,
     } = req.body;
 
+    console.log("[Sense] Request body:", {
+      word,
+      pos,
+      senseLength: sense?.length,
+      keywordsCount: Array.isArray(keywords) ? keywords.length : 0,
+      topK,
+      maxExamplesPerPeriod,
+    });
+
     if (!word || !sense) {
+      console.timeEnd("sense-total");
       return res.status(400).json({
         error: "Missing required fields: word and sense.",
       });
@@ -730,6 +755,8 @@ exports.exploreSense = async (req, res) => {
     const cleanPos = String(pos).trim().toLowerCase();
     const cleanSense = String(sense).trim();
 
+    console.time("sense-find-word");
+
     const targetWord = await Word.findOne({
       where: {
         word: cleanWord,
@@ -737,11 +764,22 @@ exports.exploreSense = async (req, res) => {
       },
     });
 
+    console.timeEnd("sense-find-word");
+
     if (!targetWord) {
+      console.timeEnd("sense-total");
       return res.status(404).json({
         error: `Word not found for ${cleanWord}/${cleanPos}.`,
       });
     }
+
+    console.log("[Sense] Found word:", {
+      id: targetWord.id,
+      word: targetWord.word,
+      pos: targetWord.part_of_speech,
+    });
+
+    console.time("sense-db-texts");
 
     const texts = await Text.findAll({
       where: {
@@ -751,7 +789,12 @@ exports.exploreSense = async (req, res) => {
       order: [["id", "ASC"]],
     });
 
+    console.timeEnd("sense-db-texts");
+
+    console.log("[Sense] Text rows:", texts.length);
+
     if (!texts || texts.length === 0) {
+      console.timeEnd("sense-total");
       return res.status(404).json({
         error: "No text examples found for this word.",
       });
@@ -767,6 +810,8 @@ exports.exploreSense = async (req, res) => {
       t2: [],
       unknown: [],
     };
+
+    console.time("sense-build-examples");
 
     for (const text of texts) {
       const dataset = text.dataset;
@@ -794,16 +839,28 @@ exports.exploreSense = async (req, res) => {
       });
     }
 
+    console.timeEnd("sense-build-examples");
+
+    console.log("[Sense] Examples by period:", {
+      t1: examplesByPeriod.t1.length,
+      t2: examplesByPeriod.t2.length,
+      unknown: examplesByPeriod.unknown.length,
+    });
+
     const sampledExamples = [
       ...examplesByPeriod.t1.slice(0, maxExamplesPerPeriod),
       ...examplesByPeriod.t2.slice(0, maxExamplesPerPeriod),
       ...examplesByPeriod.unknown.slice(0, maxExamplesPerPeriod),
     ];
 
+    console.log("[Sense] Sampled examples:", sampledExamples.length);
+
     const senseForMatching =
       Array.isArray(keywords) && keywords.length > 0
         ? `${cleanSense}. Related keywords: ${keywords.join(", ")}`
         : cleanSense;
+
+    console.time("sense-python-minilm");
 
     const matcherResult = await runPythonSenseMatcher({
       sense: senseForMatching,
@@ -811,13 +868,25 @@ exports.exploreSense = async (req, res) => {
       topK,
     });
 
+    console.timeEnd("sense-python-minilm");
+
     const matches = matcherResult.matches || {
       t1: [],
       t2: [],
       unknown: [],
     };
 
+    console.log("[Sense] MiniLM result:", {
+      t1: matches.t1?.length || 0,
+      t2: matches.t2?.length || 0,
+      unknown: matches.unknown?.length || 0,
+      bestT1: matches.t1?.[0]?.similarity,
+      bestT2: matches.t2?.[0]?.similarity,
+    });
+
     let llmResult;
+
+    console.time("sense-gemini");
 
     try {
       llmResult = await buildLLMSenseInterpretation({
@@ -836,6 +905,10 @@ exports.exploreSense = async (req, res) => {
           "LLM interpretation could not be generated. The examples below were retrieved using MiniLM semantic similarity, but the LLM API call failed.",
       };
     }
+
+    console.timeEnd("sense-gemini");
+
+    console.timeEnd("sense-total");
 
     return res.json({
       word: cleanWord,
@@ -856,6 +929,7 @@ exports.exploreSense = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error in exploreSense:", error);
+    console.timeEnd("sense-total");
 
     return res.status(500).json({
       error: "Internal Server Error",

@@ -698,7 +698,11 @@ const SemanticChangeApp = () => {
       setSenseResult(data);
     } catch (error) {
       console.error("Sense Explorer error:", error);
-      setSenseError(error.message || "Something went wrong.");
+      setSenseError(
+      error.message === "Failed to fetch"
+        ? "The request could not reach the backend or the backend took too long to respond. Please check the Render logs."
+        : error.message || "Something went wrong."
+);
     } finally {
       setIsExploringSense(false);
     }

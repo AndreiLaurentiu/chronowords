@@ -1013,8 +1013,6 @@ console.log("[Sense] Evidence level:", {
       has_enough_evidence: hasEnoughEvidence,
       matches,
       interpretation: llmResult.interpretation,
-      note:
-        "This is a POC. It uses precomputed Gemini embeddings for retrieving examples and a Gemini language model for a short interpretation.",
     });
   } catch (error) {
     console.error("❌ Error in exploreSense:", error);

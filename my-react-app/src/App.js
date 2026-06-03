@@ -879,12 +879,6 @@ const SemanticChangeApp = () => {
     <div style={styles.aboutBox}>
       <h2 style={styles.aboutTitle}>Sense Explorer</h2>
 
-      <p style={{ color: "#374151", lineHeight: 1.7, fontSize: "16px" }}>
-        This experimental page lets the user test a proposed meaning for a word already included
-        in the application. The system compares the proposed sense with the stored corpus examples
-        and retrieves the closest examples from both time periods.
-      </p>
-
       <div style={styles.aboutCard}>
         <div
           style={{
